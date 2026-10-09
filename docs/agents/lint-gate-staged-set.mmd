@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant Hook as .git-hooks/pre-commit
+    participant Pylint as pylint
+
+    Dev->>Hook: git commit, staging some .py files
+    Hook->>Hook: split staged .py into tests/ and everything else
+
+    Note over Hook,Pylint: Two calls, because a test module gets a<br/>looser module-length cap than anything else
+    Hook->>Pylint: call 1 — the staged non-test files
+    Pylint-->>Hook: per-file checks, and duplicate-code within call 1
+    Hook->>Pylint: call 2 — the staged test files, --max-module-lines=1250
+    Pylint-->>Hook: per-file checks, and duplicate-code within call 2
+
+    Note over Hook,Pylint: A per-file check reads one file, so it answers the same<br/>every time. duplicate-code compares files against each<br/>other, and only inside one call — so it never compares<br/>a test file with a source file.
+
+    alt one call holds both halves of a similar pair
+        Hook-->>Dev: REFUSED — R0801, naming lines the commit never touched
+        Dev->>Hook: git commit --no-verify
+        Note over Dev,Hook: that also drops flake8, the spelling gate,<br/>mypy and both test suites
+    else neither call holds both halves
+        Hook-->>Dev: committed
+    end

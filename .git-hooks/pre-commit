@@ -1,0 +1,469 @@
+#!/bin/bash
+#
+# Pre-commit hook.
+#
+# Four rules it is built on. Activate the project environment, because the tools
+# live there and not on PATH. Look only at what is being committed, so one broken
+# file elsewhere cannot block a documentation change — the test command and the
+# type gate are exceptions, and each says why where it runs. Check every exit
+# code. And count a missing tool as a failure, because a check that did not
+# run is not a check that passed.
+#
+# **Which gates run depends on `KIT_STACK` in `.kit/config.env`.**
+#
+#   every stack   secrets (gitleaks), document structure, skill mirror,
+#                 spelling, the project's own test and lint commands
+#   python only   black, flake8, pylint, mypy, import resolution, layering —
+#                 each prints "NOT RUN (stack is X)" for any other stack
+#
+# This hook works in a repository that holds no Python at all. The kit's own
+# tools (`tools/doc_structure.py`) need an interpreter on the machine, not a
+# Python project.
+
+set -uo pipefail
+
+echo "Running pre-commit checks..."
+
+# The self-check and the environment, shared with pre-push rather than written
+# out twice. See `common.sh` for why the self-check exists. Found by looking for
+# the file rather than by assuming a directory name: an installed project keeps
+# its hooks in `.git-hooks`, the kit itself in `hooks`.
+repo_top="$(git rev-parse --show-toplevel)"
+if [ -f "$repo_top/.git-hooks/common.sh" ]; then
+    hooks_dir=".git-hooks"
+else
+    hooks_dir="hooks"
+fi
+# shellcheck source=.git-hooks/common.sh
+source "$repo_top/$hooks_dir/common.sh"
+
+# Every refusal ends the same way, written once so all of them stay in step.
+#
+# **The way out depends on which refusal this is.** A gate that ran and failed
+# can be overridden on purpose, so that is the default. A gate of unknown shape
+# cannot: `--no-verify` skips every check rather than the broken one. Such a
+# caller passes its own lines, one per argument.
+refuse_commit() {
+    local refusal_line
+    echo
+    echo "Pre-commit checks FAILED — commit aborted."
+    if [ "$#" -gt 0 ]; then
+        for refusal_line in "$@"; do
+            echo "$refusal_line"
+        done
+    else
+        echo "To commit anyway, and only when you mean it: git commit --no-verify"
+    fi
+    exit 1
+}
+
+if ! refuse_if_stale pre-commit "$0" "$@"; then
+    refuse_commit \
+        "The gate above is not this checkout's, so what it checked is unknown." \
+        "Fix it with the command it printed. Skipping every gate is not the way" \
+        "past a broken one."
+fi
+
+failed=0
+
+# The branch rule runs first and alone: a commit on the wrong branch is wrong
+# whatever else it contains. See `protected-branch.sh`.
+echo "  protected branch..."
+if "$(dirname "$0")/protected-branch.sh"; then
+    echo "    ok"
+else
+    refuse_commit
+fi
+
+# Everything staged, whatever its type — the question "could this commit break a
+# test?" is asked of the whole change, not of one file list. See
+# `any_path_affects_tests` in `common.sh` for what counts.
+staged_all=()
+while IFS= read -r staged_file; do
+    [ -n "$staged_file" ] && staged_all+=("$staged_file")
+done < <(git diff --cached --name-only --diff-filter=ACMDRT)
+
+tests_needed=no
+if any_path_affects_tests "${staged_all[@]:-}"; then
+    tests_needed=yes
+fi
+
+# **A missing tool says FAILED, not NOT RUN.** NOT RUN means the gate was not
+# needed and the commit is fine; a reader learns to skim it. Saying it while
+# setting `failed=1` in the same breath left a refused commit whose only
+# explanation read as healthy.
+require() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "    FAILED — $1 is not installed. Run ./setup-dev-env.sh"
+        failed=1
+        return 1
+    fi
+    return 0
+}
+
+# What a gate says when the stack is not its stack. One sentence, one place.
+not_this_stack() {
+    echo "  NOT RUN — $1 (stack is ${KIT_STACK}; this gate is for python)."
+}
+
+# **The environment is required exactly when something needs it.** Checked
+# rather than called bare: a system flake8 or pylint on PATH would satisfy the
+# guards below while looking at a different project. A prose-only commit runs
+# none of those, so it is not asked for one.
+if kit_is_python && [ "$tests_needed" = "yes" ]; then
+    if ! activate_venv; then
+        refuse_commit
+    fi
+else
+    # Best effort. The spelling, skill-mirror and secret gates are shell scripts
+    # and need nothing from it, so a miss here is not a failure.
+    kit_is_python && { activate_venv >/dev/null 2>&1 || true; }
+fi
+
+# Only the Python files staged for this commit — added, copied or modified.
+# Built with a read loop rather than mapfile, because macOS ships bash 3.2 and
+# mapfile arrived in bash 4.
+staged_py=()
+while IFS= read -r staged_file; do
+    [ -n "$staged_file" ] && staged_py+=("$staged_file")
+done < <(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+
+# Wider than flake8 and pylint on purpose. Spelling is settled for prose as much
+# as for code, and prose lives in every one of these types: a comment is prose
+# wherever it lives, and a diagram source is prose that happens to render.
+#
+# `*.svg` sits beside `*.mmd` because a hand-drawn SVG is not generated from its
+# `.mmd` — its text and its `aria-label` are written by hand.
+#
+# `*.json` stays out because package metadata includes names others own.
+#
+# **The hooks directory is a directory rather than a suffix, because the hooks
+# have no suffix.** `pre-commit` and `pre-push` are the two files git insists on
+# naming itself, so no `*.sh` ever matched them and their comments — the densest
+# prose in the repo — were the one place this gate could not see.
+staged_words=()
+while IFS= read -r staged_file; do
+    [ -n "$staged_file" ] && staged_words+=("$staged_file")
+done < <(git diff --cached --name-only --diff-filter=ACM \
+    -- '*.py' '*.md' '*.yaml' '*.yml' '*.mmd' '*.svg' '*.sh' '*.toml' \
+       '*.env.example' '*.js' '*.mjs' '*.ts' '*.tsx' '*.css' '*.html' \
+       ".git-hooks/*" "hooks/*")
+
+if ! kit_is_python; then
+    not_this_stack "format, style and analysis (black, flake8, pylint)"
+elif [ ${#staged_py[@]} -eq 0 ]; then
+    echo "  no Python files staged — skipping style and analysis"
+else
+    # **Black is checked, never applied.** `--check` rather than a reformat. A
+    # hook that rewrites the file you are committing changes what you are about
+    # to commit after you have read it, which is worse than refusing and saying
+    # so. Staged files only, like flake8 and pylint beside it; the whole-tree
+    # question belongs to CI, which is also what makes it unskippable —
+    # `--no-verify` skips every hook.
+    echo "  format (black) on ${#staged_py[@]} file(s)..."
+    if require black; then
+        if black --check --quiet "${staged_py[@]}"; then
+            echo "    ok"
+        else
+            echo "    FAILED — run: black ${staged_py[*]}"
+            failed=1
+        fi
+    fi
+
+    echo "  style (flake8) on ${#staged_py[@]} file(s)..."
+    if require flake8; then
+        if flake8 "${staged_py[@]}"; then
+            echo "    ok"
+        else
+            echo "    FAILED"
+            failed=1
+        fi
+    fi
+
+    # **Two pylint passes, because the module-length cap depends on what the
+    # file is.** `pyproject.toml` holds the cap for code a model reads a slice of
+    # at a time. A test module gets a wider one: it grows by cases, and a case
+    # added at the end does not make the ones above it harder to read. Pylint
+    # takes one `max-module-lines` for a whole run, which is why the second cap is
+    # a flag here and not a second line in the config.
+    #
+    # **Both passes turn `duplicate-code` off, and `pre-push` runs it instead.**
+    # It is the one pylint check whose answer depends on which files are in the
+    # run, and a commit's file set is whatever it happened to stage.
+    staged_test_py=()
+    staged_other_py=()
+    for staged_file in "${staged_py[@]}"; do
+        case "$staged_file" in
+            # Any file under a `tests/` directory, not just the top-level one.
+            tests/* | */tests/*) staged_test_py+=("$staged_file") ;;
+            *) staged_other_py+=("$staged_file") ;;
+        esac
+    done
+
+    echo "  analysis (pylint) on ${#staged_py[@]} file(s)..."
+    if require pylint; then
+        pylint_failed=0
+        if [ ${#staged_other_py[@]} -gt 0 ]; then
+            pylint --disable=duplicate-code "${staged_other_py[@]}" \
+                || pylint_failed=1
+        fi
+        if [ ${#staged_test_py[@]} -gt 0 ]; then
+            pylint --disable=duplicate-code --max-module-lines=1250 \
+                "${staged_test_py[@]}" || pylint_failed=1
+        fi
+        if [ "$pylint_failed" -eq 0 ]; then
+            echo "    ok"
+        else
+            echo "    FAILED"
+            failed=1
+        fi
+    fi
+fi
+
+# **The type gate reads the whole tree, on the same question the tests run on.**
+# It takes no file list: mypy reads what `[tool.mypy]` in `pyproject.toml` (or a
+# `mypy.ini`) names. It is keyed off `tests_needed` rather than staged Python so
+# that a commit staging only `pyproject.toml`, the one place this gate can be
+# loosened, still meets it. Not configured is NOT RUN, said so.
+mypy_configured=no
+if [ -f mypy.ini ] || { [ -f pyproject.toml ] && grep -q '^\[tool\.mypy' pyproject.toml; }; then
+    mypy_configured=yes
+fi
+if ! kit_is_python; then
+    not_this_stack "types (mypy)"
+elif [ "$tests_needed" = "no" ]; then
+    echo "  NOT RUN — types (mypy)."
+elif [ "$mypy_configured" = "no" ]; then
+    echo "  NOT RUN — types (mypy): no [tool.mypy] in pyproject.toml and no mypy.ini."
+elif require mypy; then
+    echo "  types (mypy) over what pyproject.toml names..."
+    if mypy; then
+        echo "    ok"
+    else
+        echo "    FAILED"
+        failed=1
+    fi
+fi
+
+# **Every import of the project's own package names a module and a name that
+# exist.** Keyed off `tests_needed` like the type gate above, and whole-tree for
+# the same reason. What it covers that mypy and the tests do not, and why it
+# checks names rather than modules, is `tools/resolve_imports.py`.
+if ! kit_is_python; then
+    not_this_stack "own-package imports resolve"
+elif [ "$tests_needed" = "no" ]; then
+    echo "  NOT RUN — own-package imports resolve."
+elif [ ! -f tools/resolve_imports.py ]; then
+    echo "  own-package imports resolve..."
+    echo "    FAILED — tools/resolve_imports.py is missing."
+    failed=1
+elif require python; then
+    echo "  own-package imports resolve (${KIT_PYTHON_PACKAGE})..."
+    if python tools/resolve_imports.py; then
+        echo "    ok"
+    else
+        echo "    FAILED"
+        failed=1
+    fi
+fi
+
+# The layering rule: which area may import which. Skipped when the package
+# directory does not exist — a project that has not started its package has no
+# layers to hold — and said so.
+if ! kit_is_python; then
+    not_this_stack "layering"
+elif [ "$tests_needed" = "no" ]; then
+    echo "  NOT RUN — layering."
+elif [ ! -d "$KIT_PACKAGE_DIR" ]; then
+    echo "  NOT RUN — layering: ${KIT_PACKAGE_DIR} does not exist."
+elif [ ! -f tools/layering.py ]; then
+    echo "  layering..."
+    echo "    FAILED — tools/layering.py is missing."
+    failed=1
+elif require python; then
+    echo "  layering (${KIT_PACKAGE_DIR})..."
+    if python tools/layering.py; then
+        echo "    ok"
+    else
+        echo "    FAILED"
+        failed=1
+    fi
+fi
+
+# Its own block rather than inside the Python-files block, because it runs on
+# prose too and would otherwise be skipped by "no Python files staged" — which
+# is exactly the commit it most needs to look at.
+if [ ${#staged_words[@]} -eq 0 ]; then
+    echo "  nothing with words in it staged — skipping the spelling gate"
+else
+    # One function rather than a block per gate, so gates cannot drift apart. A
+    # gate that is missing or not executable counts as a failure, the same rule
+    # `require` applies to a missing tool.
+    #
+    # `failed` is deliberately the hook's own — it is the running total every
+    # check adds to. The `gate_` names are `local`, because `common.sh`'s
+    # `gate_over` uses that prefix too.
+    run_gate() {
+        local gate_label gate_script
+        gate_label="$1"
+        gate_script="$repo_top/$hooks_dir/$2"
+
+        echo "  ${gate_label} on ${#staged_words[@]} file(s)..."
+        if [ ! -x "$gate_script" ]; then
+            echo "    FAILED — $gate_script is missing or not executable."
+            failed=1
+        elif "$gate_script" "${staged_words[@]}"; then
+            echo "    ok"
+        else
+            echo "    FAILED"
+            failed=1
+        fi
+    }
+
+    run_gate "spelling (${KIT_SPELLING_LOCALE})" american-spelling.sh
+fi
+
+# **The skills tree has a shape, and the shape is the check.** Its own block
+# rather than a `run_gate` call, because it takes no file list: it asks whether
+# the layers still line up — `.claude/skills` links into `.agents/skills`, which
+# holds the project's own skills plus one link per borrowed one into `vendor/`.
+#
+# All three paths are watched, because check 5 refuses a name that exists as real
+# files in both `.agents/skills` and `vendor/`, and staging either side alone is
+# enough to create that shape.
+#
+# **`T` is in the diff filter on purpose.** A clone with `core.symlinks=false`
+# materializes a link as a plain file holding the target path, and committing
+# that stages `T` and nothing else. Without it this selects nothing, says "no
+# skills staged", and lands a skill that is no longer a link.
+staged_skills=()
+while IFS= read -r staged_file; do
+    [ -n "$staged_file" ] && staged_skills+=("$staged_file")
+done < <(git diff --cached --name-only --diff-filter=ACMDRT \
+    -- '.agents/skills' '.claude/skills' 'vendor')
+
+if [ ${#staged_skills[@]} -eq 0 ]; then
+    echo "  no skills staged — skipping the skill mirror gate"
+else
+    skill_gate="$repo_top/$hooks_dir/skill-mirror.sh"
+    echo "  skill mirror (${#staged_skills[@]} skill file(s) staged)..."
+    if [ ! -x "$skill_gate" ]; then
+        echo "    FAILED — $skill_gate is missing or not executable."
+        failed=1
+    elif "$skill_gate"; then
+        echo "    ok"
+    else
+        echo "    FAILED"
+        failed=1
+    fi
+fi
+
+# **The agent documentation has a shape too.** Whether a doc is reachable, and
+# whether a pointer lands, are questions about the whole tree rather than about
+# a staged file — a file nothing points at is orphaned by the pointer nobody
+# wrote, which is a change somewhere else. So this runs unconditionally and it is
+# cheap enough to (well under a second). It runs for every stack.
+#
+# **A checkout with no agent docs is NOT RUN, not FAILED.** There is nothing to
+# be reachable from. CI runs this against a real checkout, so a genuinely
+# missing script still fails where it counts. A machine with no interpreter is a
+# FAILED, though: the gate exists and could not run.
+echo "  document structure..."
+if [ ! -f "$repo_top/tools/doc_structure.py" ] \
+    || { [ ! -f "$repo_top/AGENTS.md" ] && [ ! -d "$repo_top/docs/agents" ]; }; then
+    echo "    NOT RUN — no AGENTS.md or docs/agents beside $repo_top/tools/,"
+    echo "    so there is no pointer graph to check."
+elif ! doc_python="$(find_python)"; then
+    echo "    FAILED — no working python on this machine, so the document"
+    echo "    structure cannot be checked. Install Python 3.10 or later."
+    failed=1
+elif (cd "$repo_top" && "$doc_python" tools/doc_structure.py); then
+    :
+else
+    echo "    FAILED"
+    failed=1
+fi
+
+# **Secrets.** Staged content only, for every commit, for every stack. The
+# scanner is mandatory: not installed is a FAILED gate with the install hint,
+# never a skip. `secret-scan.sh` owns finding it, including where a Windows
+# install puts it.
+secret_gate="$repo_top/$hooks_dir/secret-scan.sh"
+echo "  secrets (gitleaks, staged)..."
+if [ ! -x "$secret_gate" ]; then
+    echo "    FAILED — $secret_gate is missing or not executable."
+    failed=1
+elif "$secret_gate"; then
+    echo "    ok"
+else
+    echo "    FAILED"
+    failed=1
+fi
+
+# The project's own lint command, if it names one. Whole tree, any stack, keyed
+# off `tests_needed` for the same reason the type gate is.
+if [ -z "${KIT_LINT_CMD// /}" ]; then
+    echo "  NOT RUN — project lint: no KIT_LINT_CMD configured."
+elif [ "$tests_needed" = "no" ]; then
+    echo "  NOT RUN — project lint."
+else
+    echo "  project lint (${KIT_LINT_CMD})..."
+    if (cd "$repo_top" && bash -c "$KIT_LINT_CMD"); then
+        echo "    ok"
+    else
+        echo "    FAILED"
+        failed=1
+    fi
+fi
+
+# **The tests.** Run in full on every commit that could change one, unlike the
+# lint gates above: a test exists to catch a change over here breaking something
+# over there, which is the opposite of the file-scoped rule. What runs is
+# `KIT_TEST_CMD` — or, for a Python project that names none, pytest over
+# `KIT_TEST_DIRS`. With neither it is NOT RUN, and says why.
+#
+# `-ra` is not added for you: a command that lets a skip pass in silence is a
+# check that did not run, reading as a pass. Put it in `KIT_TEST_CMD`.
+test_cmd="$(kit_test_cmd)"
+if [ "$tests_needed" = "no" ]; then
+    # A check that did not run must never read as a check that passed.
+    echo "  NOT RUN — the tests."
+    tests_not_needed_note "staged"
+elif [ -z "$test_cmd" ]; then
+    echo "  NOT RUN — the tests: no test command configured."
+    echo "    Set KIT_TEST_CMD in .kit/config.env (for example: node --test)."
+else
+    run_ok=yes
+    # A Python test command needs the environment's pytest, not a system one.
+    if kit_is_python; then
+        case "$test_cmd" in
+            *pytest*) require pytest || run_ok=no ;;
+        esac
+    fi
+    if [ "$run_ok" = "yes" ]; then
+        echo "  tests (${test_cmd})..."
+        (cd "$repo_top" && bash -c "$test_cmd")
+        case $? in
+            0)
+                echo "    ok"
+                ;;
+            5)
+                # Exit 5 is pytest collecting nothing. A suite that vanished is a
+                # failure, not a pass.
+                echo "    FAILED — no tests collected. A suite that vanished is a"
+                echo "    failure, not a pass."
+                failed=1
+                ;;
+            *)
+                echo "    FAILED"
+                failed=1
+                ;;
+        esac
+    fi
+fi
+
+if [ "$failed" -ne 0 ]; then
+    refuse_commit
+fi
+
+echo "Pre-commit checks passed."

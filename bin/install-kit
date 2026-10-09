@@ -1,0 +1,208 @@
+#!/bin/bash
+#
+# Install the engineering kit into a project and apply one overlay.
+#
+#   bin/install-kit <target-dir> <overlay> [--dry-run] [--force]
+#
+
+set -uo pipefail
+
+KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET=""
+OVERLAY=""
+DRY=0
+FORCE=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY=1 ;;
+        --force) FORCE=1 ;;
+        -*) echo "Unknown option: $arg" >&2; exit 2 ;;
+        *) if [ -z "$TARGET" ]; then TARGET="$arg"; elif [ -z "$OVERLAY" ]; then OVERLAY="$arg"; fi ;;
+    esac
+done
+
+if [ -z "$TARGET" ] || [ -z "$OVERLAY" ]; then
+    echo "Usage: bin/install-kit <target-dir> <overlay> [--dry-run] [--force]" >&2
+    echo "Overlays: $(ls "$KIT/overlays" | tr '\n' ' ')" >&2
+    exit 2
+fi
+if [ ! -d "$KIT/overlays/$OVERLAY" ]; then
+    echo "No overlay named '$OVERLAY'. Have: $(ls "$KIT/overlays" | tr '\n' ' ')" >&2
+    exit 2
+fi
+if [ ! -d "$TARGET" ]; then
+    echo "Target directory does not exist: $TARGET" >&2
+    exit 2
+fi
+TARGET="$(cd "$TARGET" && pwd)"
+OV="$KIT/overlays/$OVERLAY"
+
+created=(); skipped=(); overwritten=(); links=()
+
+# How skills are stored in the target. `copy` (the default) makes every skill real
+# files in .agents/skills and .claude/skills, which works with no symlink rights
+# and survives a push and a clone. `link` uses links into one real copy.
+LAYOUT="$(grep -m1 '^KIT_SKILL_LAYOUT=' "$OV/config.env" 2>/dev/null | cut -d'"' -f2)"
+LAYOUT="${LAYOUT:-copy}"
+
+say() { [ "$DRY" -eq 1 ] && echo "[dry-run] $*" || echo "$*"; }
+
+# copy_file <src> <dst> <owner: kit|project>
+copy_file() {
+    local src="$1" dst="$2" owner="$3"
+    if [ -e "$dst" ]; then
+        if [ "$FORCE" -eq 1 ] && [ "$owner" = kit ]; then
+            overwritten+=("${dst#$TARGET/}")
+            [ "$DRY" -eq 1 ] || cp "$src" "$dst"
+        else
+            skipped+=("${dst#$TARGET/}")
+        fi
+        return
+    fi
+    created+=("${dst#$TARGET/}")
+    if [ "$DRY" -eq 0 ]; then mkdir -p "$(dirname "$dst")"; cp "$src" "$dst"; fi
+}
+
+# copy_tree <src-dir> <dst-dir> <owner>
+copy_tree() {
+    local src="$1" dst="$2" owner="$3" f rel
+    while IFS= read -r -d '' f; do
+        rel="${f#$src/}"
+        copy_file "$f" "$dst/$rel" "$owner"
+    done < <(find "$src" -type f -not -name '*.pyc' -not -path '*/__pycache__/*' -print0)
+}
+
+# make_link <relative-target> <link-path>: symlink, then junction, then copy.
+make_link() {
+    local rel="$1" link="$2" abs kind
+    [ -e "$link" ] || [ -L "$link" ] && { skipped+=("${link#$TARGET/}"); return; }
+    if [ "$DRY" -eq 1 ]; then links+=("${link#$TARGET/} (dry-run)"); return; fi
+    mkdir -p "$(dirname "$link")"
+    abs="$(cd "$(dirname "$link")" && cd "$(dirname "$rel")" 2>/dev/null && pwd)/$(basename "$rel")"
+    if MSYS=winsymlinks:nativestrict ln -s "$rel" "$link" 2>/dev/null && [ -d "$link" ]; then
+        kind=symlink
+    elif command -v cmd.exe >/dev/null 2>&1 \
+         && cmd.exe //c mklink //J "$(cygpath -w "$link")" "$(cygpath -w "$abs")" >/dev/null 2>&1; then
+        kind=junction
+    else
+        rm -rf "$link"; cp -r "$abs" "$link"; kind=copy
+    fi
+    links+=("${link#$TARGET/} ($kind)")
+}
+
+# append_missing <lines-file> <dst>: add each line the destination lacks, never reorder or remove.
+append_missing() {
+    local src="$1" dst="$2" line added=0
+    [ -f "$src" ] || return
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if [ ! -f "$dst" ] || ! grep -qxF -- "$line" "$dst"; then
+            [ "$DRY" -eq 1 ] || { [ -f "$dst" ] && [ -n "$(tail -c1 "$dst")" ] && printf '
+' >> "$dst"; printf '%s
+' "$line" >> "$dst"; }
+            added=$((added + 1))
+        fi
+    done < "$src"
+    [ "$added" -gt 0 ] && overwritten+=("${dst#$TARGET/} ($added line(s) appended)")
+}
+
+say "Kit:     $KIT"
+say "Target:  $TARGET"
+say "Overlay: $OVERLAY"
+echo
+
+# 1. Hooks. The kit and a project both keep them in .git-hooks/.
+copy_tree "$KIT/.git-hooks" "$TARGET/.git-hooks" kit
+# 2. Rules, templates, tools, tests that prove the gates.
+copy_tree "$KIT/docs/agents" "$TARGET/docs/agents" kit
+copy_tree "$KIT/tools" "$TARGET/tools" kit
+copy_tree "$KIT/tests" "$TARGET/tests" kit
+copy_tree "$KIT/ci" "$TARGET/.github/workflows" kit
+for f in setup-dev-env.sh .flake8 .gitignore .dockerignore pytest.ini pyproject.toml skills-lock.json; do
+    [ -f "$KIT/$f" ] && copy_file "$KIT/$f" "$TARGET/$f" project
+done
+# 3. Skills: ours and borrowed, real directories under .agents/skills.
+# Our skills are the real directories in the kit's own .agents/skills; the
+# kit's links are rebuilt in the target, never copied.
+for d in "$KIT"/.agents/skills/*/; do
+    [ -L "${d%/}" ] && continue
+    [ -f "$d/SKILL.md" ] || continue
+    copy_tree "${d%/}" "$TARGET/.agents/skills/$(basename "$d")" kit
+done
+copy_tree "$KIT/vendor" "$TARGET/vendor" kit
+if [ "$LAYOUT" = "copy" ]; then
+    # Real files everywhere. bin/sync-skills copies each borrowed skill out of
+    # vendor/ into .agents/skills, and every skill into .claude/skills, byte for
+    # byte; the skill-mirror gate then proves they stay identical.
+    if [ "$DRY" -eq 0 ]; then bash "$KIT/bin/sync-skills" "$TARGET" >/dev/null; fi
+    links+=("skills (copy layout: real files, no links)")
+else
+    # Borrowed skills are LINKS from .agents/skills into vendor/, never a second copy.
+    for set in "$KIT"/vendor/*/; do
+        for d in "$set"*/; do
+            [ -f "$d/SKILL.md" ] || continue
+            n="$(basename "$d")"
+            make_link "../../vendor/$(basename "$set")/$n" "$TARGET/.agents/skills/$n"
+        done
+    done
+    # 4. .claude/skills links into .agents/skills.
+    for d in "$TARGET"/.agents/skills/*/; do
+        [ -d "$d" ] || continue
+        make_link "../../.agents/skills/$(basename "$d")" "$TARGET/.claude/skills/$(basename "$d")"
+    done
+fi
+# 5. Config and baseline ADRs (project-owned once created).
+mkdir -p "$TARGET/.kit" 2>/dev/null
+copy_file "$OV/config.env" "$TARGET/.kit/config.env" project
+[ -f "$OV/document_types.local.yaml" ] && copy_file "$OV/document_types.local.yaml" "$TARGET/tools/document_types.local.yaml" project
+copy_file "$KIT/.kit/config.env.example" "$TARGET/.kit/config.env.example" kit
+copy_tree "$KIT/templates/adr-seeds" "$TARGET/docs/adr" project
+# 5b. A context file, only when the project has neither CONTEXT.md nor GLOSSARY.md.
+if [ ! -f "$TARGET/CONTEXT.md" ] && [ ! -f "$TARGET/GLOSSARY.md" ]; then
+    created+=("CONTEXT.md (seeded from the glossary template)")
+    [ "$DRY" -eq 1 ] || sed -n '/^Template starts below the line\./,$p'         "$KIT/docs/agents/document-templates/glossary.md" | sed '1,2d' > "$TARGET/CONTEXT.md"
+fi
+# 5c. Lines the project's own .gitignore and .gitattributes must carry.
+append_missing "$OV/gitignore.append" "$TARGET/.gitignore"
+append_missing "$KIT/overlays/gitattributes.append" "$TARGET/.gitattributes"
+# 6. AGENTS.md: create from the template, or add the kit block between markers.
+BEGIN="<!-- kit:begin -->"; END="<!-- kit:end -->"
+block="$(cat "$KIT/AGENTS.md"; printf '\n'; cat "$OV/AGENTS.fragment.md")"
+if [ ! -f "$TARGET/AGENTS.md" ]; then
+    created+=("AGENTS.md")
+    [ "$DRY" -eq 1 ] || printf '%s\n%s\n%s\n' "$BEGIN" "$block" "$END" > "$TARGET/AGENTS.md"
+elif ! grep -qF "$BEGIN" "$TARGET/AGENTS.md"; then
+    overwritten+=("AGENTS.md (kit block appended, existing text untouched)")
+    [ "$DRY" -eq 1 ] || printf '\n%s\n%s\n%s\n' "$BEGIN" "$block" "$END" >> "$TARGET/AGENTS.md"
+else
+    skipped+=("AGENTS.md (kit block already present; edit between the markers by hand or remove it and re-run)")
+fi
+# 7. CLAUDE.md imports AGENTS.md and nothing else of ours.
+if [ ! -f "$TARGET/CLAUDE.md" ]; then
+    created+=("CLAUDE.md"); [ "$DRY" -eq 1 ] || printf '@AGENTS.md\n' > "$TARGET/CLAUDE.md"
+elif ! grep -qxF "@AGENTS.md" "$TARGET/CLAUDE.md"; then
+    overwritten+=("CLAUDE.md (@AGENTS.md line appended)")
+    [ "$DRY" -eq 1 ] || printf '\n@AGENTS.md\n' >> "$TARGET/CLAUDE.md"
+fi
+
+echo
+echo "Created:     ${#created[@]}"
+echo "Overwritten: ${#overwritten[@]}"
+for x in ${overwritten[@]+"${overwritten[@]}"}; do echo "  ~ $x"; done
+echo "Skipped (already exist, compare by hand): ${#skipped[@]}"
+for x in ${skipped[@]+"${skipped[@]}"}; do echo "  = $x"; done
+echo "Skill links: ${#links[@]}"
+printf '%s\n' ${links[@]+"${links[@]}"} | sed 's/.*(\(.*\))/\1/' | sort | uniq -c | sed 's/^/  /'
+echo
+if [ "$DRY" -eq 0 ] && [ "$LAYOUT" = "link" ] && git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1; then
+    bash "$KIT/bin/stage-skill-links" "$TARGET"
+fi
+for ctx in CONTEXT.md GLOSSARY.md; do
+    if [ -f "$TARGET/$ctx" ] && grep -q '^# <Context name> Language' "$TARGET/$ctx"; then
+        echo
+        echo "NOTE: $ctx is still the unfilled template. AGENTS.md says the product's"
+        echo "      vocabulary lives there, so fill it before the first design doc."
+    fi
+done
+echo "Next: cd \"$TARGET\" && edit .kit/config.env, then:  bash setup-dev-env.sh"

@@ -1,0 +1,253 @@
+#!/bin/bash
+#
+# Pre-push hook: the checks too slow or too wide for every commit.
+#
+# What runs here is what needs a stable file set or a long wait — the
+# duplicate-code gate (whole tree, so its answer does not depend on what one
+# commit staged) and the optional guarantee check. The Python-only ones run when
+# `KIT_STACK=python` in `.kit/config.env` and say NOT RUN (stack is X) otherwise.
+#
+# ## What is actually being pushed
+#
+# Git names each ref on stdin, as `<local ref> <local sha> <remote ref> <remote
+# sha>`. The paths that differ decide whether the checks below are needed, so a
+# push carrying only prose is not asked for an environment. Run by hand there is
+# no stdin and no refs, which means "I cannot tell", which means run everything.
+#
+# ## A switched-off optional check is not a missing required one
+#
+# A push is never blocked by something the project has not set up (no guarantee
+# list, no test command). It is blocked by a check that ran and failed, and by a
+# required tool that is missing — a check that did not run is not a check that
+# passed.
+#
+# ## The guarantee check (optional)
+#
+# `tools/guarantees.py` runs once for the tip commit of every ref this push
+# changes, and the worst result decides. It runs only when the project has a
+# `tools/guarantees.yaml` list; with none, it is NOT RUN and says so.
+
+set -uo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+cd "$REPO" || exit 1
+
+# The self-check and the environment, shared with pre-commit rather than written
+# out twice. See `common.sh`.
+if [ -f "$REPO/.git-hooks/common.sh" ]; then
+    hooks_dir=".git-hooks"
+else
+    hooks_dir="hooks"
+fi
+# shellcheck source=.git-hooks/common.sh
+source "$REPO/$hooks_dir/common.sh"
+
+refuse_if_stale pre-push "$0" "$@" || exit 1
+
+echo "Running pre-push checks..."
+
+# Every refusal ends the same way, written once so all of them stay in step. Each
+# argument prints as its own line, indented like the rest of the hook.
+refuse_push() {
+    local refusal_line
+    for refusal_line in "$@"; do
+        echo "  $refusal_line"
+    done
+    echo
+    echo "  To push anyway, and only when you mean it: git push --no-verify"
+    exit 1
+}
+
+# A sha of all zeros is git's way of saying "nothing here": on the local side it
+# means the ref is being deleted, on the remote side that the branch is new over
+# there.
+is_absent_sha() {
+    case "$1" in
+        *[!0]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+pushed_paths=""
+# **A ref the remote already has sends nothing.** Git still names it on stdin,
+# with the same sha on both sides, and its diff is empty — which looks exactly
+# like "git gave no usable diff". Counted apart from an empty commit, which has
+# two different shas and still runs everything.
+refs_named=0
+refs_already_there=0
+# A deletion sends no commit either, so a push of nothing else takes the same
+# way out as one the remote already holds.
+refs_deleted=0
+# **The tip of every ref the push changes, for the guarantee check.** Kept
+# before the base is looked up, so a new branch with no remote default branch to
+# measure from is still measured: the check needs the commit, not a diff.
+measure_shas=""
+if [ ! -t 0 ]; then
+    while read -r _local_ref local_sha _remote_ref remote_sha; do
+        [ -n "${local_sha:-}" ] || continue
+        refs_named=$((refs_named + 1))
+        # A deletion carries no files to test.
+        if is_absent_sha "$local_sha"; then
+            refs_deleted=$((refs_deleted + 1))
+            continue
+        fi
+        if [ "$local_sha" = "${remote_sha:-}" ]; then
+            refs_already_there=$((refs_already_there + 1))
+            continue
+        fi
+        measure_shas="${measure_shas} ${local_sha}"
+
+        if is_absent_sha "${remote_sha:-0}"; then
+            # New branch: compare against where it left the default branch, not
+            # against the whole of history.
+            push_base="$(git merge-base "$local_sha" "origin/${KIT_DEFAULT_BRANCH}" 2>/dev/null)"
+        else
+            push_base="$remote_sha"
+        fi
+
+        # Empty base means the question could not be answered — no remote
+        # default branch to measure from, usually. The list stays empty, and an
+        # empty list runs everything.
+        [ -n "$push_base" ] || continue
+        pushed_paths="${pushed_paths}
+$(git diff --name-only "$push_base" "$local_sha" 2>/dev/null)"
+    done
+fi
+
+pushed_list=()
+while IFS= read -r pushed_one; do
+    [ -n "$pushed_one" ] && pushed_list+=("$pushed_one")
+done <<< "$pushed_paths"
+
+# An empty list means Git gave no usable diff, so the checks run — unless every
+# ref named is one the remote already holds, in which case the push sends
+# nothing and nothing can reach a test.
+tests_needed=yes
+if [ "$refs_named" -gt 0 ] \
+    && [ $((refs_already_there + refs_deleted)) -eq "$refs_named" ]; then
+    echo "  NOT RUN — the duplicate-code gate and the guarantee check."
+    echo "    Every ref in this push is already on the remote or being deleted,"
+    echo "    so the push sends no commit and nothing here can change what a"
+    echo "    check does."
+    echo "Pre-push checks passed."
+    exit 0
+fi
+if [ ${#pushed_list[@]} -gt 0 ]; then
+    any_path_affects_tests "${pushed_list[@]}" || tests_needed=no
+fi
+
+if ! kit_is_python; then
+    echo "  NOT RUN — the duplicate-code gate (stack is ${KIT_STACK}; this gate is for python)."
+    echo "  NOT RUN — the guarantee check (stack is ${KIT_STACK}; this gate is for python)."
+    echo "Pre-push checks passed."
+    exit 0
+fi
+
+if [ "$tests_needed" = "no" ]; then
+    echo "  NOT RUN — the duplicate-code gate and the guarantee check."
+    tests_not_needed_note "in this push"
+    echo "Pre-push checks passed."
+    exit 0
+fi
+
+# Checked, not called and forgotten. Without the project environment a system
+# pylint on PATH would satisfy the guard below and check a different project.
+if ! activate_venv; then
+    refuse_push "FAILED — no project environment, so nothing here can check this push."
+fi
+
+# **The cross-file check, over a file set that does not move.**
+# `duplicate-code.sh` holds the run and the exempt list. It is keyed off
+# `tests_needed` with everything else above rather than off "is there Python in
+# this push", because `pyproject.toml` and `.pylintrc` can change what it answers
+# with no `.py` in the push at all.
+echo "  duplicate code (pylint) over every tracked .py..."
+if [ ! -x "$REPO/$hooks_dir/duplicate-code.sh" ]; then
+    refuse_push "FAILED — $hooks_dir/duplicate-code.sh is missing or not executable."
+fi
+if "$REPO/$hooks_dir/duplicate-code.sh"; then
+    echo "    ok"
+else
+    refuse_push "FAILED — duplicate code across files."
+fi
+
+# **The guarantee check.** Its exits are ranked, never compared as numbers. The
+# `case` below follows `RANK` and `EXIT` in `tools/guarantee_results.py`, which
+# own the order and the codes: `unmeasured`, a fact about the machine, ranks
+# below `unproved` though its exit is larger, so taking the largest code would
+# push a guarantee nothing defends because another ref's tip could not be
+# measured. A test pins the `case` to those two. Anything the tool does not
+# name — a signal, a missing interpreter — ranks worst of all.
+guarantee_rank() {
+    case "$1" in
+        0) echo 0 ;;
+        3) echo 1 ;;
+        1) echo 2 ;;
+        2) echo 3 ;;
+        *) echo 4 ;;
+    esac
+}
+
+if [ ! -f "$REPO/tools/guarantees.yaml" ]; then
+    echo "  NOT RUN — the guarantee check: this project has no tools/guarantees.yaml."
+else
+    echo "  guarantees (tools/guarantees.py)..."
+    # Checked before the call: Python's own exit for a script it cannot open is
+    # the code `EXIT` gives `broken`, and its exit for a module it cannot import
+    # is the code `EXIT` gives `unproved`, so the refusal would name the wrong
+    # thing either way.
+    for guarantee_file in guarantees.py guarantee_proofs.py guarantee_results.py; do
+        if [ ! -f "$REPO/tools/$guarantee_file" ]; then
+            refuse_push "FAILED — tools/$guarantee_file is missing, so no guarantee can be measured."
+        fi
+    done
+    if ! command -v python >/dev/null 2>&1; then
+        refuse_push \
+            "FAILED — python is not installed in the project environment, so no" \
+            "guarantee can be measured. Run ./setup-dev-env.sh."
+    fi
+
+    # Run by hand there are no refs, which means "I cannot tell", which means
+    # measure what is checked out. A push that named refs and sent no commit left
+    # by the early exit above, so past here the list is never empty.
+    [ "$refs_named" -gt 0 ] || measure_shas="HEAD"
+
+    guarantee_worst=0
+    trees_measured=" "
+    for measure_sha in $measure_shas; do
+        # Two refs at one tree hold the same code, and an entry can take a long
+        # time to learn the same thing twice.
+        measure_tree="$(git rev-parse "${measure_sha}^{tree}" 2>/dev/null)"
+        measure_tree="${measure_tree:-$measure_sha}"
+        case "$trees_measured" in
+            *" ${measure_tree} "*) continue ;;
+        esac
+        trees_measured="${trees_measured}${measure_tree} "
+
+        # `-u` because stdout is a pipe here, and one entry can take a while to
+        # print a line a block buffer would hold back.
+        python -u "$REPO/tools/guarantees.py" --ref "$measure_sha"
+        measure_rank="$(guarantee_rank $?)"
+        if [ "$measure_rank" -gt "$guarantee_worst" ]; then
+            guarantee_worst=$measure_rank
+        fi
+        # A refusal is certain now, and the next tip would cost the same time to
+        # say so again.
+        [ "$guarantee_worst" -ge 2 ] && break
+    done
+
+    case $guarantee_worst in
+        0)
+            echo "    ok"
+            ;;
+        1)
+            echo "    PASSED WITH UNMEASURED GUARANTEES — a guarantee not measured"
+            echo "    is not proved. The reason is above. Pushing anyway."
+            ;;
+        *)
+            refuse_push "FAILED — the guarantee check did not pass; its output is above."
+            ;;
+    esac
+fi
+
+echo "Pre-push checks passed."

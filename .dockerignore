@@ -1,0 +1,47 @@
+# What a build rooted here does not want in its context.
+#
+# The context is the repository root, so without this a build uploads the venv
+# and every worktree — a gigabyte of things the image never opens.
+# `offline/Dockerfile.dockerignore` does the same job for that build, and is named
+# for its Dockerfile because that is how BuildKit scopes an ignore file to one
+# build. **A build whose Dockerfile has one of those does not read this file at
+# all**, so this covers only builds that have none.
+
+# Virtual environments, whatever the project calls them.
+.venv/
+venv/
+*-venv/
+
+.git/
+.claude/
+
+# **Files that hold each developer's own values.** Both are gitignored, so
+# neither is usually here — but a build context is not the place to find out.
+# Mount them at run time instead, which is what keeps a credential out of an
+# image layer.
+.env
+.env.*
+environments.yaml
+
+# **Every `.env`, wherever it sits, and that is what `**/` buys.** The rules
+# above match only the context root, so a service's file would otherwise have to
+# be listed by name, and the list goes stale the moment a service moves.
+**/.env
+**/.env.*
+
+# Nothing here is imported by the package.
+tests/
+docs/
+offline/
+tools/
+.git-.git-hooks/
+.git-hooks/
+.github/
+.scratch/
+
+# Python's own leavings, which vary by machine and would bust the layer cache.
+**/__pycache__/
+**/*.pyc
+.coverage
+.pytest_cache/
+.mypy_cache/

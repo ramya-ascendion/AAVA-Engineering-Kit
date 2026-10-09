@@ -1,0 +1,25 @@
+flowchart TB
+    subgraph split["Proposed — the cross-file check moves to a fixed set"]
+        direction TB
+        S1["git commit"] -->|"stages whatever the change touched"| S2["pre-commit"]
+        S2 -->|"both calls gain --disable=duplicate-code"| S3["per-file checks only"]
+        S3 -->|"same answer whatever else is staged"| S4["pass or refuse,<br/>on this change alone"]
+
+        S5["git push"] --> S6["pre-push"]
+        S6 -->|"one call: --disable=all --enable=duplicate-code<br/>over every tracked .py, 22s"| S7["duplicate-code only"]
+        S7 -->|"one fixed file set, one answer,<br/>and it does compare tests with source"| S8["pass or refuse,<br/>on the whole tree"]
+    end
+
+    subgraph today["Today — the cross-file check rides along with the per-file ones"]
+        direction TB
+        T1["git commit"] -->|"stages whatever the change touched"| T2["pre-commit"]
+        T2 -->|"call 1: the staged non-test files"| T3["per-file checks<br/>+ duplicate-code"]
+        T2 -->|"call 2: the staged test files"| T4["per-file checks<br/>+ duplicate-code"]
+        T3 -->|"answer depends on the staged set"| T5["pass or refuse,<br/>by luck of the commit"]
+        T4 -->|"and never compares across the two calls"| T5
+    end
+
+    classDef gap fill:#1A2638,stroke:#FFC53D,stroke-width:1.5px,color:#E9F1F9
+    classDef inScope fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    class T3,T4,T5 gap
+    class S3,S4,S7,S8 inScope

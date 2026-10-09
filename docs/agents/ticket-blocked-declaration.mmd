@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    actor Engineer
+    actor Lead
+    participant Board as The board
+    participant Panel as The blocked panel
+
+    Engineer->>Lead: I intend to move PROJ-NNN to blocked because we need<br/>ACTOR to do ACTION before our team can work on this
+
+    alt Lead agrees
+        Lead-->>Engineer: Proceed
+        Engineer->>Board: Status to Blocked, label to ready-for-human,<br/>comment naming the actor, the ask and the date
+        Note over Board: Assignee unchanged —<br/>still the engineer who will build it
+        Board->>Panel: The ticket shows in the blocked panel
+        Panel->>Lead: This block is now the lead's to clear
+    else The lead's questions show it is not blocked
+        Lead-->>Engineer: Who exactly, and what have they been asked for?
+        Note over Engineer,Panel: Nothing moves. The ticket stays where it is,<br/>and never reaches the blocked panel
+    end

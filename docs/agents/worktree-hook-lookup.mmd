@@ -1,0 +1,40 @@
+%% layout: mmdc default route
+flowchart TD
+    COMMIT["git commit or git push<br/>run from inside a worktree"]
+
+    OVERRIDE{"Does this worktree carry<br/>its own core.hooksPath?"}
+    HANDOFF["hand off: exec this branch's<br/>own .git-hooks/&lt;hook&gt;"]
+    OWN_HOOK["this worktree's .git-hooks/&lt;hook&gt;"]
+
+    RELEVANT{"Could anything in the change<br/>alter what a test does?"}
+    SKIP["NOT RUN — the suites<br/>no environment needed, commit allowed"]
+
+    LOOKUP{"activate_venv:<br/>is there a project virtualenv here?"}
+    LOCAL["the worktree's own virtualenv"]
+    FALLBACK["the main checkout's virtualenv<br/>found via --git-common-dir"]
+    NOTHING["no environment anywhere<br/>refuse, and say what was looked for"]
+
+    SRC["this checkout's src, prepended<br/>to PYTHONPATH"]
+    SUITE["the suite runs against this branch"]
+
+    COMMIT -->|"git looks up which hook file to run"| OVERRIDE
+    OVERRIDE -->|"yes, absolute path to main"| HANDOFF
+    OVERRIDE -->|"no, the repo-wide relative setting"| OWN_HOOK
+    HANDOFF -->|"same arguments, same stdin"| OWN_HOOK
+
+    OWN_HOOK -->|"asks path_affects_tests about the change"| RELEVANT
+    RELEVANT -->|"no .py, nothing under the test or package<br/>directories, .git-hooks or tools, nothing that configures a run"| SKIP
+    RELEVANT -->|"yes"| LOOKUP
+
+    LOOKUP -->|"yes"| LOCAL
+    LOOKUP -->|"no, and the common dir ends in .git"| FALLBACK
+    LOOKUP -->|"no, and no checkout to fall back to"| NOTHING
+
+    LOCAL -->|"supplies the tools"| SRC
+    FALLBACK -->|"supplies the tools"| SRC
+    SRC -->|"python reads it before the editable install's .pth"| SUITE
+
+    classDef inScope fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    classDef failure fill:#1A2638,stroke:#FF5C64,stroke-width:1.5px,color:#E9F1F9
+    class COMMIT,OVERRIDE,HANDOFF,OWN_HOOK,RELEVANT,SKIP,LOOKUP,LOCAL,FALLBACK,SRC,SUITE inScope
+    class NOTHING failure

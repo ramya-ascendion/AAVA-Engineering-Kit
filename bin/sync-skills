@@ -1,0 +1,99 @@
+#!/bin/bash
+#
+# Make every skill real files in all three places, with no links anywhere.
+#
+#   bin/sync-skills [target-dir]        (default: the current directory)
+#
+#   vendor/<source>/<name>/   pristine borrowed skills. Never written here.
+#   .agents/skills/<name>/    our skills (the source of truth, never deleted)
+#                             and a byte-identical copy of each borrowed one.
+#   .claude/skills/<name>/    a byte-identical copy of every .agents/skills entry.
+#
+# Why copies: a link needs symlink rights on Windows, is stored by git as a text
+# file on a clone without them, and shows as empty in many viewers. Real files
+# work everywhere. The `skill-mirror` gate, with `KIT_SKILL_LAYOUT="copy"`,
+# proves the copies match their source, so they cannot drift quietly.
+#
+# Re-run it after editing one of our skills or updating `vendor/`. It is
+# idempotent. It removes a link or junction only by removing the link itself,
+# never what it points at.
+
+set -uo pipefail
+
+T="${1:-.}"
+cd "$T" || { echo "No such directory: $T" >&2; exit 2; }
+T="$(pwd)"
+
+[ -d vendor ] || [ -d .agents/skills ] || { echo "Nothing to sync: no vendor/ or .agents/skills in $T" >&2; exit 2; }
+
+# Remove a link (symlink or Windows junction) without touching its target.
+# A junction looks like a symlink to Git Bash, and `rm -rf` on one is not worth
+# betting a vendored tree on, so the file system is asked to remove the link.
+drop_link() {
+    local path="$1"
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            cmd.exe //c rmdir "$(cygpath -w "$path")" >/dev/null 2>&1 && return 0
+            ;;
+    esac
+    rm -f -- "$path"
+}
+
+# Make $2 a real, byte-identical copy of the directory $1.
+copy_dir() {
+    local src="$1" dst="$2"
+    [ -L "$dst" ] && drop_link "$dst"
+    [ -e "$dst" ] && rm -rf -- "$dst"
+    mkdir -p "$(dirname "$dst")"
+    cp -r -- "$src" "$dst"
+}
+
+mkdir -p .agents/skills .claude/skills
+made=0
+
+# 1. Borrowed skills become real copies in .agents/skills.
+for set in vendor/*/; do
+    [ -d "$set" ] || continue
+    for src in "$set"*/; do
+        [ -f "${src}SKILL.md" ] || continue
+        name="$(basename "$src")"
+        copy_dir "${src%/}" ".agents/skills/${name}"
+        made=$((made + 1))
+    done
+done
+
+# 2. Any other link left in .agents/skills is removed; real directories stay.
+for entry in .agents/skills/*; do
+    [ -L "$entry" ] && { echo "removing stray link $entry"; drop_link "$entry"; }
+done
+
+# 3. .claude/skills is rebuilt as a copy of every skill in .agents/skills, and
+#    anything in it with no source is removed.
+for entry in .claude/skills/*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    name="$(basename "$entry")"
+    if [ -L "$entry" ]; then drop_link "$entry"
+    elif [ ! -d ".agents/skills/${name}" ]; then rm -rf -- "$entry"; echo "removed orphan $entry"
+    fi
+done
+for src in .agents/skills/*/; do
+    [ -f "${src}SKILL.md" ] || continue
+    name="$(basename "$src")"
+    copy_dir "${src%/}" ".claude/skills/${name}"
+    made=$((made + 1))
+done
+
+echo "sync-skills: $made copies written. $(ls .agents/skills | wc -l) skill(s) in .agents/skills, $(ls .claude/skills | wc -l) in .claude/skills."
+
+# Index hygiene: a repo that already tracked these as links must forget them,
+# or git keeps the old symlink entry beside the new files.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    git ls-files -s -- .agents/skills .claude/skills | awk '$1 == "120000" {print}' | cut -f2- | while IFS= read -r l; do
+        git rm -q --cached -- "$l" >/dev/null 2>&1
+    done
+    git update-index --really-refresh >/dev/null 2>&1 || true
+    # Undo the working-tree flags the old link helper set, if any.
+    git ls-files -v -- .agents/skills .claude/skills | awk '$1 == "S" {print $2}' | while IFS= read -r f; do
+        git update-index --no-skip-worktree -- "$f" >/dev/null 2>&1
+    done
+fi

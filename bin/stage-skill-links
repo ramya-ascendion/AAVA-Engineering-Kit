@@ -1,0 +1,43 @@
+#!/bin/bash
+#
+# Record every skill link in a target repo's git index as a real symlink
+# (mode 120000), whatever the working tree holds.
+#
+#   bin/stage-skill-links <target-dir>
+#
+# Why: on Windows without Developer Mode a link is made as a junction or a copy,
+# and git cannot store either. `git add` then stages the directory behind it
+# file by file, which is the two-copies problem the skill-mirror gate exists to
+# stop. This writes the symlink entry straight into the index instead. Run it
+# again if skill links are added or removed. With Developer Mode on and
+# `git config core.symlinks true`, plain `git add` is enough and this is a no-op.
+
+set -uo pipefail
+T="${1:?usage: bin/stage-skill-links <target-dir>}"
+cd "$T" || exit 2
+n=0
+for dir in .claude/skills .agents/skills; do
+    [ -d "$dir" ] || continue
+    for link in "$dir"/*; do
+        [ -e "$link" ] || [ -L "$link" ] || continue
+        case "$dir" in
+            .claude/skills) target="../../.agents/skills/$(basename "$link")" ;;
+            *) [ -f "vendor/$(ls vendor 2>/dev/null | head -1)/$(basename "$link")/SKILL.md" ] \
+                   && target="../../vendor/$(ls vendor | head -1)/$(basename "$link")" || continue ;;
+        esac
+        git rm -r -q --cached --ignore-unmatch -- "$link" >/dev/null 2>&1
+        blob="$(printf '%s' "$target" | git hash-object -w --stdin)"
+        git update-index --add --cacheinfo "120000,$blob,$link" && n=$((n + 1))
+        # The working tree holds a junction or copy here. Tell git to ignore it,
+        # so a later `git add -A` keeps the symlink entry instead of re-staging
+        # the directory behind it. Skipped when real symlinks are in use.
+        if [ "$(git config --get core.symlinks)" != true ]; then
+            git update-index --skip-worktree -- "$link"
+            # The files behind a junction are untracked paths, which `git add -A`
+            # would add. A repo-local exclude (never committed) stops that.
+            grep -qxF "/$link/" "$(git rev-parse --git-path info/exclude)" 2>/dev/null                 || printf '/%s/
+' "$link" >> "$(git rev-parse --git-path info/exclude)"
+        fi
+    done
+done
+echo "stage-skill-links: $n link(s) recorded as symlinks in the index"

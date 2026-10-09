@@ -1,0 +1,253 @@
+# The gates that need nothing but a checkout, run where they cannot be skipped.
+#
+# `--no-verify` skips every pre-commit hook, so a hook alone is a reminder
+# rather than a gate. These are the same scripts the hooks call, run again on
+# the pull request, so the failure lands where the next reader and the next agent
+# will see it.
+#
+# This file is the kit's copy. The installer puts it at
+# `.github/workflows/gates.yml` in a project, and the two are kept identical.
+#
+# **Per-project settings come from `.kit/config.env`**, read with
+# `python tools/kit_config.py KEY`. The Python-only jobs (layering, black, mypy)
+# run only when `KIT_STACK` is `python`; the secrets, document-structure, word
+# and skill-mirror gates run for every stack. A job that has nothing to check
+# says so in a notice, never silently.
+#
+# **The hooks directory is `.git-hooks` in a project and `hooks` in the kit
+# itself**, so each job looks for whichever exists.
+
+name: gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  document-structure:
+    name: document structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # The only dependency the check has, pinned by hash in
+      # `tools/requirements-ci.txt`. Installing the project would pull a whole
+      # environment to answer three questions about file paths; installing this
+      # unpinned would run whatever PyPI served at job time on the runner.
+      - run: pip install --require-hashes -r tools/requirements-ci.txt
+      - name: every doc reachable, every pointer lands, every registry path real
+        run: |
+          if [ -f AGENTS.md ] || [ -d docs/agents ]; then
+            python tools/doc_structure.py
+          else
+            echo "::notice::NOT RUN - no AGENTS.md or docs/agents, so there is no pointer graph to check"
+          fi
+
+  layering:
+    name: layering
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # No install at all: the check reads the tree with `ast` from the standard
+      # library. It never imports the project, which is the point: an import
+      # graph read by importing would need the environment it is describing.
+      - name: every import runs the way the layering tables say
+        run: |
+          package_dir="$(python tools/kit_config.py KIT_PACKAGE_DIR)"
+          stack="$(python tools/kit_config.py KIT_STACK)"
+          if [ "$stack" != "python" ]; then
+            echo "::notice::NOT RUN - stack is $stack; layering is a python gate"
+          elif [ ! -d "$package_dir" ]; then
+            echo "::notice::NOT RUN - $package_dir does not exist"
+          else
+            python tools/layering.py
+          fi
+
+  types:
+    name: types (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # The version `tools/requirements-mypy-ci.txt` resolved its closure
+          # for.
+          python-version: "3.12"
+      - name: mypy over what pyproject.toml names
+        run: |
+          stack="$(python tools/kit_config.py KIT_STACK)"
+          if [ "$stack" != "python" ]; then
+            echo "::notice::NOT RUN - stack is $stack; mypy is a python gate"
+          elif [ ! -f mypy.ini ] && ! grep -q '^\[tool\.mypy' pyproject.toml 2>/dev/null; then
+            echo "::notice::NOT RUN - no [tool.mypy] in pyproject.toml and no mypy.ini"
+          else
+            # Pinned by hash, so a compromised release cannot be substituted.
+            # The same bare `mypy` the commit hook runs, here against one pinned
+            # set of libraries because each developer's venv can hold a
+            # different set - and `--no-verify` skips the hook entirely.
+            pip install --require-hashes -r tools/requirements-mypy-ci.txt
+            mypy
+          fi
+
+  formatting:
+    name: black
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # The version `tools/requirements-black-ci.txt` resolved its closure
+          # for. A different minor here can want a package that file does not
+          # pin, and `--require-hashes` then fails the job rather than
+          # installing it.
+          python-version: "3.12"
+      # **The whole tree, not the changed files** - the opposite of the word
+      # gates below, and deliberately. The drift this gate exists to catch lands
+      # in files nobody is editing, so a check that only reads what a pull
+      # request touched would not have found any of it.
+      #
+      # The tracked file list rather than `black --check .`, so the gate and the
+      # command a developer is told to run read exactly the same set instead of
+      # agreeing by way of black's default exclusions.
+      - name: every tracked Python file is formatted
+        run: |
+          stack="$(python tools/kit_config.py KIT_STACK)"
+          if [ "$stack" != "python" ]; then
+            echo "::notice::NOT RUN - stack is $stack; black is a python gate"
+          else
+            pip install --require-hashes -r tools/requirements-black-ci.txt
+            files="$(git ls-files '*.py' | grep -v '^vendor/' || true)"
+            if [ -z "$files" ]; then
+              echo "::notice::NOT RUN - no tracked Python outside vendor/"
+            else
+              # shellcheck disable=SC2086
+              black --check $files
+            fi
+          fi
+
+  word-gates:
+    name: spelling
+    runs-on: ubuntu-latest
+    steps:
+      # The gates read the changed files, so the base commit has to be here to
+      # diff against.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: work out which files the gates read
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # **A base we cannot resolve falls back; it must never skip.**
+          # `github.event.before` is all zeros when a branch is first pushed,
+          # and a base commit can sit outside the fetch. Either way the diff
+          # fails, and a failure that writes an empty file and carries on is a
+          # green tick over files nobody checked - which is worse than having
+          # no gate, because it looks like one.
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "::notice::base '$BASE_SHA' is unusable; falling back to the merge base with origin/main"
+            BASE_SHA="$(git merge-base origin/main HEAD)"
+          fi
+          # No `|| true`. A diff that fails now fails the step.
+          # The extensions are the ones the pre-commit hook selects: a gate
+          # reading a different set of files from the hook disagrees with it.
+          git diff --name-only --diff-filter=ACMRT "$BASE_SHA"...HEAD \
+            -- '*.py' '*.md' '*.yaml' '*.yml' '*.mmd' '*.svg' '*.sh' '*.toml' \
+               '*.env.example' '*.js' '*.mjs' '*.ts' '*.tsx' '*.css' '*.html' \
+               '.git-hooks/*' 'hooks/*' \
+            > changed.txt
+          count="$(wc -l < changed.txt | tr -d ' ')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "base $BASE_SHA - $count file(s) the gates will read"
+          cat changed.txt
+      # `KIT_SPELLING_LOCALE=none` turns the gate off, and the script says so
+      # rather than passing in silence.
+      - name: spelling
+        if: steps.changed.outputs.count != '0'
+        run: |
+          hooks="$([ -d .git-hooks ] && echo .git-hooks || echo hooks)"
+          tr '\n' '\0' < changed.txt | xargs -0 "$hooks/american-spelling.sh"
+
+  skill-mirror:
+    name: skill mirror
+    runs-on: ubuntu-latest
+    steps:
+      # Symlinks are the thing being checked, so they have to arrive as
+      # symlinks. A checkout that materialized them as plain files holding a
+      # path would fail this for the wrong reason.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: the skill layers still line up
+        run: |
+          hooks="$([ -d .git-hooks ] && echo .git-hooks || echo hooks)"
+          "$hooks/skill-mirror.sh"
+
+  secrets:
+    name: secrets (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      # Every commit in the range is read, not only the tip: a secret committed
+      # and then deleted is still in history.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The release binary, pinned by version and checked against its published
+      # sha256, so what runs on the runner is what this repo reviewed. Raising
+      # the version means fetching the new checksum from the release's
+      # `gitleaks_<version>_checksums.txt`.
+      - name: install gitleaks 8.21.2
+        run: |
+          version=8.21.2
+          sha=5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
+          curl -sSfL -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          echo "${sha}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+      - name: no secret in the commits this change adds
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # The same unresolvable-base rule as the word gates: fall back, never skip.
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "::notice::base '$BASE_SHA' is unusable; falling back to the merge base with origin/main"
+            BASE_SHA="$(git merge-base origin/main HEAD)"
+          fi
+          config=()
+          [ -f .gitleaks.toml ] && config=(--config .gitleaks.toml)
+          gitleaks git --redact --no-banner "${config[@]}" --log-opts "${BASE_SHA}..HEAD"
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # The project's own test command: `KIT_TEST_CMD`, or for a Python project
+      # that names none, pytest over `KIT_TEST_DIRS`. pytest and PyYAML are
+      # pinned by hash in `tools/requirements-test-ci.txt`; a project with
+      # dependencies of its own adds them there. A Node project's `node` is on
+      # the runner already.
+      - name: run the test command
+        run: |
+          stack="$(python tools/kit_config.py KIT_STACK)"
+          cmd="$(python tools/kit_config.py --test-cmd)"
+          if [ -z "$cmd" ]; then
+            echo "::notice::NOT RUN - no test command configured (KIT_TEST_CMD in .kit/config.env)"
+            exit 0
+          fi
+          if [ "$stack" = "python" ]; then
+            pip install --require-hashes -r tools/requirements-test-ci.txt
+          fi
+          echo "running: $cmd"
+          bash -c "$cmd"

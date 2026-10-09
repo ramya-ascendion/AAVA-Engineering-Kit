@@ -1,0 +1,18 @@
+stateDiagram-v2
+    direction LR
+    [*] --> ToDo
+
+    ToDo: To Do<br/>no child has started<br/>often no children at all
+    InProgress: In Progress<br/>children are moving<br/>weeks here is normal
+    InReview: In Review<br/>every child is Done
+    Done: Done<br/>no defined way in
+
+    ToDo --> InProgress: the first child goes In Progress
+    InProgress --> InReview: the last child reaches Done
+    InReview --> Done: undefined — needs the QA and UAT process
+    Done --> [*]
+
+    classDef inScope fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    classDef gap fill:#1A2638,stroke:#FFC53D,stroke-width:1.5px,color:#E9F1F9
+    class ToDo,InProgress,InReview inScope
+    class Done gap

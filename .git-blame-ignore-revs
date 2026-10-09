@@ -1,0 +1,21 @@
+# Commits `git blame` should look straight through.
+#
+# A reformat rewrites lines without changing what they do, so blame on those
+# lines names whoever ran the formatter rather than whoever wrote the code. This
+# file is git's own answer: every revision listed here is skipped, and blame
+# reports the commit underneath.
+#
+# **It is not automatic.** Point your checkout at it once:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub reads it without being asked.
+#
+# **Only ever list a commit that changed no behavior.** A commit named here is
+# invisible to the next person debugging, so a real change hidden inside one is
+# a change nobody can find. The rule that keeps that true: a reformat lands as
+# its own commit and carries nothing else.
+#
+# Format: one full commit sha per line, with a comment above saying what it was.
+#
+# No entries yet.

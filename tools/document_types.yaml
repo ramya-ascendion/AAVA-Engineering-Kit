@@ -1,0 +1,274 @@
+# Every kind of document this repo holds, and what each one is for.
+#
+# The rule is `docs/agents/document-types.md`. This file holds the values, so
+# that one script can check every document against its own type's rule instead
+# of a pile of bespoke checks. Prose that copies a value from here drifts; point
+# at the type instead.
+#
+# Each entry answers the four base questions (for, born, dies, owner) and
+# names the extra metadata its type carries beyond those. `status: settled`
+# means the type's rules are agreed and written down somewhere this file names.
+# `status: pending` means the type is real but its rules are still being agreed,
+# and the entry says what has been ruled so far.
+#
+# This is the kit's generic set. A project adds its own types below (a QA
+# runbook, a customer guide, an imported design) the way
+# `docs/agents/document-types.md` says: entry first, then the document.
+
+base_fields:
+  # Every type answers these four. A type's `extras` are what it adds on top.
+  - name: for
+    means: What this document is.
+  - name: born
+    means: When one gets created.
+  - name: dies
+    means: When it stops being current.
+  - name: owner
+    means: Who answers for it.
+
+types:
+  - type: decision-record
+    name: Decision record (ADR)
+    status: settled
+    paths: [docs/adr/*.md]
+    for: >-
+      Settles a fact. Binding until a later ADR amends it.
+    born: When a question is answered and the team agrees.
+    dies: Never. A superseded ADR stays as history.
+    owner: The decider, named in the file.
+    extras: [status, amends, amended-by, refines, related, affects]
+    rule: docs/agents/adr-format.md
+    enforcement: hybrid
+
+  - type: design-note
+    name: Work-in-progress design note
+    status: pending
+    paths: [docs/design/*.md]
+    for: >-
+      Holds a possibility, or a set of options, while it is still being
+      explored. Not a fact. A fact is what it becomes once agreed.
+    born: When a question needs examination before anyone can decide it.
+    dies: >-
+      When the ADR lands. The page is deleted, not archived, because the ADR now
+      owns the fact and git holds the history.
+    owner: The person exploring it, and the ticket that will decide it.
+    extras: [status]
+    enforcement: hybrid
+    template: docs/agents/document-templates/design-note.md
+    ruled: >-
+      The status line carries one of two values, `not decided` or
+      `owned by <ticket>`. There is no `superseded` value, because a superseded
+      note is deleted.
+
+  - type: research-note
+    name: Research note
+    status: pending
+    paths: [docs/research/*.md, docs/superpowers/research/*.md]
+    for: >-
+      Records what is true outside this project (a vendor's API, a standard, a
+      benchmark, what other tools do) with a source for every claim. A design
+      note is about our choices; a research note is about the world.
+    born: When a question needs outside evidence before we can choose.
+    dies: >-
+      Only when obsolete. A note that has merely aged is refreshed, not
+      discarded, so that other documents can keep citing it.
+    owner: The author, with the as-of date.
+    extras: [as-of, refresh-state]
+    enforcement: hybrid
+    template: docs/agents/document-templates/research-note.md
+    ruled: >-
+      The header block sits at the top of the file and is structured, so it can
+      be scanned and grepped rather than read. `refresh-state` is one of
+      current, needs-refresh, or obsolete.
+
+  - type: wayfinding-map
+    name: Wayfinding map
+    status: settled
+    paths: [docs/maps/*.md]
+    for: >-
+      The full map of a chunk of work too big for one agent session, written at
+      the depth an agent reads. The tracker carries the skimmable version and
+      links here.
+    born: When wayfinding starts, not when the tracker runs out of room.
+    dies: >-
+      When the last decision ticket closes and its facts have moved to ADRs. The
+      design-note lifecycle, one scale up.
+    owner: The tracker's map ticket.
+    extras: [map-ticket]
+    rule: docs/agents/wayfinding-operations.md
+    enforcement: hybrid
+    template: docs/agents/document-templates/wayfinding-map.md
+
+  - type: agent-convention
+    name: Agent convention doc
+    status: pending
+    paths: [docs/agents/*.md]
+    for: Tells an agent or an engineer how to work in this repo.
+    born: When a convention outgrows a paragraph in `AGENTS.md`.
+    dies: When the convention goes.
+    owner: A tooling ticket (see `docs/agents/devx-issues.md`).
+    extras: []
+    rule: docs/agents/writing-a-rule.md
+    enforcement: hybrid
+    template: docs/agents/document-templates/agent-convention.md
+    ruled: >-
+      Every file here is reachable from `AGENTS.md` or it is orphaned. That
+      check is a pure link check and needs no judgment. Each file answers one
+      question; if an agent must load it to learn something unrelated, it is two
+      files.
+
+  - type: specification
+    name: Specification
+    status: settled
+    paths: [docs/specs/*.md, specifications/*.md, docs/superpowers/specs/**/*.md]
+    template: docs/agents/document-templates/spec.md
+    for: What to build for one slice. Paired to a slice Epic in the tracker.
+    born: With the slice Epic.
+    dies: Never. It records what was built.
+    owner: The slice Epic, cited in the header.
+    extras: [slice-epic, assembled-from]
+    rule: docs/agents/slices.md
+    enforcement: hybrid
+
+  - type: guide
+    name: Guide and runbook
+    status: pending
+    paths: [docs/guides/*.md]
+    for: >-
+      Tells a person how to use or operate the kit or a project built on it. A
+      how-to explains the daily flow; a runbook lists the steps of one
+      procedure and what to do when it fails.
+    born: When people other than the author need to follow the procedure.
+    dies: When the procedure goes, or the guide is replaced.
+    owner: Whoever maintains the thing it describes.
+    extras: []
+    enforcement: inferred
+
+  - type: implementation-plan
+    name: Implementation plan
+    status: pending
+    paths: [docs/superpowers/plans/*.md]
+    for: The task-by-task steps to build one design, written before the code.
+    born: When a design is agreed and the work is about to start.
+    dies: Never. It records how the work was broken down.
+    owner: The design it implements.
+    extras: []
+    enforcement: inferred
+
+  - type: document-template
+    name: Document template
+    status: settled
+    paths: [docs/agents/document-templates/*.md]
+    for: The shape a new document of one type starts from.
+    born: When a type is registered and promises a template.
+    dies: With the type.
+    owner: The type that names it as `template:`.
+    extras: []
+    rule: docs/agents/document-types.md
+    enforcement: inferred
+
+  - type: glossary
+    name: Glossary
+    status: settled
+    paths: [GLOSSARY.md, CONTEXT.md, CONTEXT-MAP.md]
+    template: docs/agents/document-templates/glossary.md
+    for: Defines a term. Settled.
+    born: Lazily, when a term actually gets resolved.
+    dies: Never.
+    owner: The domain-modeling skill.
+    extras: []
+    rule: docs/agents/domain.md
+    enforcement: inferred
+
+  - type: readme
+    name: README and SETUP
+    status: pending
+    paths: [README.md, SETUP.md]
+    template: docs/agents/document-templates/setup.md
+    for: How a newcomer runs the thing and finds their way.
+    born: One per runnable unit.
+    dies: With the unit.
+    owner: Whoever owns the unit.
+    extras: []
+    enforcement: inferred
+    ruled: >-
+      List a README here only when this repo owns it. A README in a copied or
+      generated tree is overwritten on the next sync, and a hand edit to one is
+      lost.
+
+  - type: skill
+    name: Agent skill
+    status: settled
+    paths: [.agents/skills/*/SKILL.md]
+    for: A packaged procedure an agent follows.
+    born: When a procedure is worth repeating exactly.
+    dies: When the procedure goes.
+    owner: A tooling ticket (see `docs/agents/devx-issues.md`).
+    extras: [name, description]
+    rule: docs/agents/skill-overrides.md
+    enforcement: deterministic
+    gate: .git-hooks/skill-mirror.sh
+
+  - type: skill-companion
+    name: Skill companion file
+    status: settled
+    paths: [".agents/skills/*/*.md"]
+    for: >-
+      One step of a skill that only some runs reach, in its own file beside it,
+      so a run that skips the step never loads it.
+    born: >-
+      When a step of a skill is conditional and long enough to pay for the
+      pointer.
+    dies: >-
+      When the step goes, or when every run reaches it and it belongs back in
+      the SKILL.md.
+    owner: The skill it sits beside.
+    extras: []
+    rule: docs/agents/skill-overrides.md
+    enforcement: deterministic
+    gate: .git-hooks/skill-mirror.sh
+    ruled: >-
+      The paths above overlap the skill type on one file. A `SKILL.md` is a
+      skill, never a companion; every other Markdown file at that depth is a
+      companion.
+
+  - type: diagram
+    name: Diagram
+    status: settled
+    paths: ["**/*.mmd", "**/*.svg"]
+    for: Explains a thing that has a shape.
+    born: Whenever the thing being explained has a shape. Do not ask first.
+    dies: With the document that owns it.
+    owner: The document it explains.
+    extras: []
+    rule: docs/agents/diagramming.md
+    enforcement: hybrid
+    ruled: A diagram's files live beside what they explain.
+
+  - type: scratch
+    name: Local tracker items and scratch
+    status: settled
+    paths: [.scratch/**]
+    for: >-
+      The tickets themselves when `KIT_TRACKER` is `local`, and otherwise
+      historical design input that is not the active tracker.
+    born: When a ticket is written in the local tracker variant.
+    dies: When the ticket is Done and nothing points at it any more.
+    owner: The ticket's assignee, or nobody for historical input.
+    extras: []
+    rule: docs/agents/issue-tracker.md
+    template: docs/agents/document-templates/ticket.md
+    enforcement: inferred
+
+# Files under `docs/` a project keeps by name although no type claims them (for
+# example a tracker file its AGENTS.md names). A project lists its own in
+# `tools/document_types.local.yaml`, which the installer never overwrites.
+allowed_paths: []
+
+# Paths that hold no document of any type. A file here belongs to a type, and
+# the type says where it goes.
+forbidden_paths:
+  - path: docs/*.md
+    because: >-
+      The root of `docs/` is a drawer, not a type. Every file there belongs to a
+      type that names its own directory.

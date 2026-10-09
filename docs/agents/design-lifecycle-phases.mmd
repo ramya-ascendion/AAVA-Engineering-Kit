@@ -1,0 +1,26 @@
+%% BPMN lanes: one subgraph per model tier. Time runs down the page; the one
+%% edge crossing the lane boundary is the handoff from the strongest model to the fast model.
+flowchart TD
+    subgraph STRONG["STRONGEST MODEL — Extra/Medium effort"]
+        W["/aes-wayfinder<br/>produces: an ADR and a map"]
+        D1["/artifact-diagramming<br/>produces: a conceptual diagram, the whole project<br/>strongly encouraged, not a gate"]
+    end
+
+    subgraph FAST["FAST MODEL — High/Medium effort"]
+        S["/to-spec<br/>produces: Project Epics — user stories, implementation decisions"]
+        D2["/artifact-diagramming<br/>produces: an Epic diagram, for planning<br/>strongly encouraged, not a gate"]
+        T["/to-tickets<br/>produces: Tasks and Stories — what to build, acceptance criteria, blocker links"]
+        D3["/artifact-diagramming<br/>produces: a Story diagram, verifying planning hasn't drifted<br/>strongly encouraged, not a gate"]
+    end
+
+    H["Hands off to the delivery lifecycle<br/>docs/agents/ticket-lifecycle.md"]
+
+    W --> D1 --> S
+    S --> D2 --> T --> D3 --> H
+
+    classDef phase fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    classDef gate fill:#141E2D,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9,stroke-dasharray:5 4
+    classDef done fill:#1A2638,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    class W,S,T phase
+    class D1,D2,D3 gate
+    class H done

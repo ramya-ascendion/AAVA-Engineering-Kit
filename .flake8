@@ -1,0 +1,31 @@
+[flake8]
+# 88 to match black's default, so the two tools do not disagree.
+max-line-length = 88
+
+exclude =
+    .git,
+    __pycache__,
+    # Virtual environments, whatever they are called: `KIT_VENV_DIR` in
+    # `.kit/config.env` names the project's own.
+    .venv,
+    venv,
+    # An installed JavaScript workspace ships Python of its own. The commit hook
+    # lints staged files, so it never sees them; a whole-tree run does.
+    node_modules,
+    # Upstream skills are not ours to lint.
+    vendor,
+    build,
+    dist,
+    *.egg-info,
+    .pytest_cache,
+    .scratch,
+    .claude/worktrees
+
+# E203 disagrees with how black formats slices.
+#
+# E501 is left to black as well: black wraps code to 88 but deliberately never
+# splits a string literal, so a long line of prose or an f-string survives
+# `black` and then fails `flake8` — the two tools disagreeing, which
+# max-line-length above exists to prevent. Black is the authority on line
+# length; flake8 checks everything else.
+extend-ignore = E203, E501

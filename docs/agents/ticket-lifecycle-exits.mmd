@@ -1,0 +1,14 @@
+%% The two endings that are not shipping. The handoff is a self-transition on
+%% purpose: it changes who holds the ticket and nothing else, so it is not an exit.
+stateDiagram-v2
+    direction LR
+
+    InProgress: In Progress<br/>yours, and stopping<br/>label — ready-for-agent
+    Unclaimed: Back to To Do<br/>assignee — cleared<br/>status — To Do<br/>label — ready-for-agent
+    WontDo: Done, but nothing shipped<br/>label — wontfix<br/>the only Done that keeps a label
+
+    InProgress --> InProgress: handed over — only the assignee changes
+    InProgress --> Unclaimed: unclaimed — close any open PR, and say so
+    InProgress --> WontDo: decided against — comment says why
+    Unclaimed --> [*]
+    WontDo --> [*]

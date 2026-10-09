@@ -1,0 +1,13 @@
+flowchart TD
+    R[A rule we want to hold] -->|ask first| Q1{Can a script decide<br/>pass or fail with<br/>no judgment?}
+    Q1 -->|yes| Q3{Is it fast, and<br/>does it need nothing<br/>but a checkout?}
+    Q1 -->|no| Q2{Does it fail the<br/>same common way<br/>most times?}
+    Q3 -->|yes| P[Pre-commit hook]
+    Q3 -->|slow, or needs test infrastructure,<br/>or must not be skippable| G[GitHub Action]
+    Q2 -->|yes| H[Hybrid: short prose,<br/>plus a gate for<br/>the common failure]
+    Q2 -->|no| I[Inferred: prose in a<br/>leaf file, reached<br/>by a pointer]
+    P -->|--no-verify skips the hook;<br/>the Action blocks the merge<br/>and says why on the PR| G
+    H -->|the gate carries the checking,<br/>so the prose stays short| P
+
+    classDef inScope fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    class P,G,H,I inScope

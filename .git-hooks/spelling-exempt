@@ -1,0 +1,18 @@
+# Files the spelling gate does not check.
+#
+# **Prefer a per-line `spelling-ok` marker.** A line marker says which line and
+# why. A file listed here is exempt whole — including whatever the file grows
+# later — so it needs a reason that will still be true then.
+#
+# Format: one path per line, relative to the repo root. A line ending in `/`
+# exempts everything under that directory. Blank lines and lines starting with
+# `#` are ignored, so the reason for an entry lives right above it.
+#
+# Two reasons a file belongs here:
+#
+#   * It quotes outside material heavily enough that marking each line would
+#     bury the prose — a standard's title, a benchmark's metric names.
+#   * It is not ours to spell.
+#
+# Upstream skills are not ours to spell, including files a future update adds.
+vendor/

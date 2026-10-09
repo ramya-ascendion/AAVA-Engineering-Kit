@@ -1,0 +1,108 @@
+# Which issue type a ticket gets, and when.
+#
+# The rule is `docs/agents/issue-types.md`. This file holds the values, the way
+# `tools/document_types.yaml` does for documents.
+#
+# The tracker owns each type's own description, and it is not copied here: a
+# copy of someone else's text is a copy that drifts. What this file owns is when
+# *we* reach for each type, the label it mirrors, and whether the type is in use
+# yet.
+#
+# The label is the fact and the type mirrors it, because a label costs nothing
+# to create and a type is project configuration that can lag. Setting a type
+# never removes its label.
+#
+# `adopted: false` means the type exists in the tracker and nothing uses it yet.
+# Where the tracker has no issue-type field (a bare GitHub repo, or the `local`
+# variant), the label alone carries the fact and `adopted` is moot. Record your
+# own adoption counts here with a date if you track them; the kit ships none.
+
+types:
+  - name: Epic
+    level: parent
+    use_when: >-
+      Work that has children. It is the only type in most trackers that can have
+      them.
+    mirrors_label: >-
+      `wayfinder:map` for a wayfinding map, `slice` for a deliverable slice.
+      Epic is overloaded, so these two labels have no type of their own and
+      carry the whole fact.
+    adopted: true
+    rule: docs/agents/epic-lifecycle.md
+
+  - name: Story
+    level: delivery
+    use_when: >-
+      A testable, end-to-end behavior a user or operator gets. This is the
+      default for implementation work.
+    adopted: true
+    rule: docs/agents/ticket-states.md
+
+  - name: Task
+    level: delivery
+    use_when: >-
+      Concrete technical or operational work that ships no user-facing behavior.
+      Delivery only: no wayfinding ticket is a Task.
+    mirrors_label: >-
+      None. Delivery work carries no `wayfinder:*` label at all, and settling
+      work has the Planning, Grilling, Research and Prototype types instead.
+    adopted: true
+    rule: docs/agents/ticket-states.md
+
+  - name: Bug
+    level: delivery
+    use_when: Behavior that already exists is broken, incorrect, or has regressed.
+    adopted: true
+    rule: docs/agents/ticket-states.md
+
+  - name: Grilling
+    level: settling
+    use_when: >-
+      The ticket settles open questions by interviewing the person who owns the
+      answer. What `/aes-grilling` produces.
+    mirrors_label: wayfinder:grilling
+    adopted: false
+    rule: docs/agents/wayfinding-operations.md
+
+  - name: Research
+    level: settling
+    use_when: >-
+      The ticket answers a question from primary sources and writes the findings
+      up. What `/research` produces, and its output is a research note.
+    mirrors_label: wayfinder:research
+    adopted: false
+    rule: docs/agents/wayfinding-operations.md
+
+  - name: Prototype
+    level: settling
+    use_when: >-
+      The ticket builds something rough and disposable to answer a question
+      about how a thing should look or behave. What `/prototype` produces.
+    mirrors_label: wayfinder:prototype
+    adopted: false
+    rule: docs/agents/wayfinding-operations.md
+
+  - name: Planning
+    level: settling
+    use_when: >-
+      The ticket settles a question of scope, sequence or structure by working
+      it through, rather than by asking a person, reading a source, or building
+      something. The catch-all for map work that is none of the three above.
+    mirrors_label: wayfinder:planning
+    adopted: false
+    rule: docs/agents/wayfinding-operations.md
+
+  - name: Decision
+    level: outcome
+    use_when: >-
+      Use only in a tracker that offers no settling types. It names an outcome,
+      which every wayfinder ticket produces, so it describes all of them and
+      fits none. Prefer Planning where it exists.
+    adopted: false
+
+  - name: Subtask
+    level: child
+    use_when: >-
+      Nothing uses it, and nothing needs to. A ticket small enough to be a
+      subtask is small enough to be a checklist line on its parent.
+    adopted: false

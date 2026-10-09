@@ -1,0 +1,20 @@
+# Pairs of modules the duplicate-code gate does not report.
+#
+# **Format.** Two module names per line, in either order, as pylint prints them
+# — the file name without `.py` or its directory. Blank lines and lines
+# starting with `#` are ignored, so the reason for an entry lives right above
+# it. Anything after a `#` on an entry line is also a comment.
+#
+#     fixtures_a  fixtures_b      # why these two may look alike
+#
+# **A name here is a basename, and basenames repeat.** A tree can hold two files
+# called `conftest.py`. Pylint gives both the same module name, so an entry
+# naming one of those could exempt a pair nobody meant. Nothing can fix that from
+# here, so an entry naming an ambiguous basename needs its reason to say which
+# file it means and why the other one is safe.
+#
+# **Prefer extracting the shared part.** An entry says two files may resemble
+# each other for a reason that will still be true later, and nobody re-reads an
+# entry when the reason stops being true.
+#
+# No entries yet.

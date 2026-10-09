@@ -1,0 +1,32 @@
+# The build context is the repository root, so this keeps a gigabyte of things
+# the image does not want out of the upload. Named for the Dockerfile beside it,
+# which is how BuildKit scopes an ignore file to one build.
+.venv/
+venv/
+*-venv/
+
+.git/
+.claude/
+
+# **The files that hold each developer's own values.** All of them are
+# gitignored, so none is usually here — but a build context is not the place to
+# find out.
+#
+# **`**` matters here.** A bare `.env` matches the context root only, and `COPY .`
+# reaches every directory's own file. Naming each one by path instead is a list
+# that goes stale on the commit that moves one.
+**/.env
+**/.env.*
+# Except the examples, which hold no secret by rule.
+!**/.env.example
+environments.yaml
+
+# `**` matters here too. Without it these match only at the context root, and a
+# stale `tests/__pycache__` goes into the image, where a traceback then points at
+# the host's own file paths and prints `???` for source it cannot read.
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+.pytest_cache/
+.mypy_cache/
+node_modules/

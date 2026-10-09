@@ -1,0 +1,34 @@
+sequenceDiagram
+    autonumber
+    participant Git as git push
+    participant Hook as .git-hooks/pre-push
+    participant Tool as tools/guarantees.py
+    participant Server as staged test infrastructure
+
+    Git->>Hook: one line per ref on stdin
+    Hook->>Hook: keep every sha that is not a deletion<br/>and not already on the remote (HEAD when run by hand)
+    Note over Hook: no commit sent, or tests_needed no → NOT RUN, and the push goes ahead
+    Hook->>Hook: activate_venv, pytest present, duplicate code — unchanged
+    Hook->>Hook: tools/guarantees.py or python missing → FAILED
+
+    loop once per kept sha, one run per tree, stopping at a certain refusal
+        Hook->>Tool: python -u tools/guarantees.py --ref sha
+        Tool->>Tool: git archive sha into a temp tree
+        Tool->>Server: runtime entry: staged here, or in the main checkout?
+        alt staged
+            Tool->>Tool: run the proofs, remove the guard, run them again
+        else staged nowhere
+            Note over Tool,Server: unmeasured
+        end
+        Tool-->>Hook: each result as it finishes, then the worst one's exit
+    end
+
+    Hook->>Hook: worst by rank, in the order RANK puts results
+    alt unproved, broken, or an exit the tool does not name
+        Hook-->>Git: FAILED — push refused
+    else unmeasured at worst
+        Hook->>Hook: PASSED WITH UNMEASURED GUARANTEES
+    else all proved or exempt
+        Hook->>Hook: ok
+    end
+    Hook->>Hook: any later checks the project wired in — each can still refuse

@@ -1,0 +1,21 @@
+# The one dependency the document-structure and claim gates have, pinned by
+# hash.
+#
+# `tools/doc_structure.py` imports `yaml` to read the two registries, and
+# `tools/claims.py` to read the guarantee list and the owed list, and neither
+# needs anything else. Installing it as `PyYAML>=6.0` resolved whatever PyPI served
+# at job time and ran it on the runner with the job's `GITHUB_TOKEN`, which is
+# a third party executing in CI on every pull request. Pinned here instead, and
+# installed with `--require-hashes`, so a compromised release cannot be
+# substituted for the version this repo reviewed.
+#
+# Two hashes for one version: the manylinux wheel the Ubuntu runner takes, and
+# the source distribution as the fallback. The version matches the development
+# environment `setup-dev-env.sh` builds, so CI and a developer's checkout parse
+# the registries with the same parser.
+#
+# Raising the version is a deliberate act. Fetch the new hashes from
+# `https://pypi.org/pypi/PyYAML/<version>/json` rather than dropping the pin.
+PyYAML==6.0.3 \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+    --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f

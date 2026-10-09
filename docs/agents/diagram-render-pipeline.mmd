@@ -1,0 +1,19 @@
+flowchart LR
+    MMD["my-diagram.mmd<br/>committed source, owns the content"]
+    THEME["mermaid-theme.json<br/>the house palette"]
+    MMDC["mmdc<br/>default route"]
+    HAND["my-diagram.svg<br/>owns the layout only"]
+    NODE["render-diagrams.mjs<br/>Chrome, web fonts loaded"]
+    PNG["my-diagram.png<br/>committed, embedded by the doc"]
+
+    MMD -->|"-i"| MMDC
+    THEME -->|"-c, the palette"| MMDC
+    MMDC -->|"-s 2"| PNG
+    MMD -.->|"content must match"| HAND
+    HAND -.->|"layout only"| NODE
+    NODE -.->|"writes instead"| PNG
+
+    classDef std fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    classDef plain fill:#141E2D,stroke:#92B1D2,stroke-width:1.5px,color:#E9F1F9
+    class MMDC std
+    class MMD,THEME,PNG,HAND,NODE plain

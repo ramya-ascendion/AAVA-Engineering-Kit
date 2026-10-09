@@ -1,0 +1,95 @@
+# Tool configuration for the kit's Python gates. This file declares NO project
+# dependencies and no build backend: it exists so black, coverage, mypy and
+# pylint agree on one set of rules, and so the hooks and CI read the same ones.
+#
+# **Three lists here are one decision each, spread across files because the
+# tools are separate. They must agree, and neither tool reads the other's file:**
+#
+#   * pytest's `pythonpath` (pytest.ini) and pylint's `init-hook` below name the
+#     same directories. A test that imports a helper from `tests/unit` resolves
+#     under pytest and fails under pylint if only one list has it, and then
+#     passes or fails by what else was staged in the commit.
+#   * coverage's `omit` below and `tools/crap.py`'s `IGNORED_DIRS` name the same
+#     files. crap.py joins `coverage json` to `radon cc` per file and refuses
+#     when radon reports a file coverage never mentioned, so omitting a
+#     directory in one and not the other stops the gate running.
+#   * `files` in `[tool.mypy]` and `KIT_PACKAGE_DIR` in `.kit/config.env` name
+#     the package under check.
+#
+# The package, test directories and bars are settings in `.kit/config.env`; the
+# values below that repeat them are the defaults and are meant to be edited per
+# project.
+
+[tool.black]
+target-version = ["py310"]
+
+# Tests that sit inside the package are measured by nothing, so the coverage
+# figure is not lifted by suites that measure themselves. Keep this in step
+# with `IGNORED_DIRS` in `tools/crap.py`.
+[tool.coverage.run]
+omit = ["*/tests/*"]
+
+# What the type checker looks at, run as a bare `mypy` with no arguments, which
+# is exactly what the pre-commit hook does. Point `files` at the package
+# (`KIT_PACKAGE_DIR`) and `tools`. The pre-commit hook reports NOT RUN when
+# neither this section nor a `mypy.ini` exists.
+[tool.mypy]
+files = ["tools"]
+mypy_path = ["."]
+python_version = "3.10"
+warn_unused_ignores = true
+
+# Pylint runs on its own defaults plus the decisions below, each with a reason.
+# Anything genuinely wrong is fixed in the code instead of disabled here.
+[tool.pylint.main]
+# Keep this list and pytest.ini's `pythonpath` in agreement (see the top).
+init-hook = 'import sys; sys.path.append("tools"); sys.path.append("tests"); sys.path.append("tests/unit")'
+
+[tool.pylint."messages control"]
+disable = [
+    # Black owns line length; flake8 ignores E501 for the same reason. Black
+    # never splits a string literal, so a long string survives black and then
+    # fails a line-length check that disagrees with it.
+    "line-too-long",
+
+    # Docstrings are not required on every module, class and function: most test
+    # methods have names that already say what they do.
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+
+    # A pytest fixture passed into a test "redefines" the module-level name of
+    # the fixture. That is how pytest works.
+    "redefined-outer-name",
+
+    # Tests assert on internals. That is what makes them tests rather than a
+    # second implementation.
+    "protected-access",
+
+    # Fires on test stubs and configuration dataclasses, which are supposed to
+    # be small.
+    "too-few-public-methods",
+
+    # The design checks fire on the shape of a function rather than on a defect.
+    # Turned off deliberately rather than raised to whatever number happens to
+    # pass today; if size limits are wanted they should be chosen on purpose.
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-return-statements",
+    "too-many-instance-attributes",
+    "too-many-statements",
+
+    # `assert result == ()` says a tuple came back and it was empty; `not result`
+    # says only that something falsey came back. The tests mean the first, so
+    # rewriting them to satisfy this check would weaken the claim.
+    "use-implicit-booleaness-not-comparison",
+]
+
+# Not a disable but a limit set on purpose, and set low because code is read by a
+# model working from a slice of a file: a long module is the one most likely to
+# be edited from a partial view. Test modules get 1,250 instead; pylint takes one
+# `max-module-lines` per run, so the pre-commit hook lints staged tests in a
+# second pass with `--max-module-lines=1250` and owns that number.
+[tool.pylint.format]
+max-module-lines = 750

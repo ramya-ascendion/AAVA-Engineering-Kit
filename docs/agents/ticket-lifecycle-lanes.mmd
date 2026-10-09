@@ -1,0 +1,38 @@
+%% BPMN lanes: one subgraph per party. Time runs down the page;
+%% every edge crossing a lane boundary is a handoff.
+flowchart TD
+    subgraph ENGINEER
+        E1["Calls /aes-implement<br/>names the ticket, nothing else"]
+        E2["Confirms, or names<br/>another model"]
+        E2B["Approves the plan<br/>revises it, or drops the ticket"]
+        E3["Says go on the PR<br/>after reading the report"]
+    end
+
+    subgraph AGENT
+        A1["Checks what it is running<br/>the project's implementation model, medium reasoning effort"]
+        A2["Claims it, then plans the approach<br/>assignee → the engineer who called it · To Do → In Progress<br/>the criteria say what — this says how"]
+        A3["Implements<br/>full suite green · /code-review clean"]
+        A4["Checks off the acceptance criteria,<br/>then reports and asks about the PR<br/>each one against work actually done — in the ticket"]
+        A5["Opens the pull request<br/>comments on the ticket linking it"]
+        A5B["Moves it to In Review<br/>ready-for-agent → ready-for-human"]
+        A6["Closes it out<br/>In Review → Done<br/>label removed"]
+    end
+
+    subgraph REVIEWER
+        R1["Reviews the code<br/>runs /code-review by hand<br/>merges, or asks the agent to"]
+    end
+
+    E1 -->|the ticket key| A1
+    A1 -->|anything else — asks first| E2
+    A1 -->|"on the expected model — carries on"| A2
+    E2 -->|confirmed| A2
+    A2 -->|puts the plan up| E2B
+    E2B -->|approved| A3
+    E2B -.->|"dropped — unclaimed,<br/>back to To Do"| A2
+    A3 --> A4
+    A4 -->|reports, then asks| E3
+    E3 -->|go| A5
+    A5 -->|PR is open| A5B
+    A5B -->|the PR to review| R1
+    R1 -->|approved · merged| A6
+    R1 -.->|"changes requested — back to In Progress,<br/>label back to ready-for-agent"| A3

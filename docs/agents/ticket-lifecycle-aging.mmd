@@ -1,0 +1,29 @@
+stateDiagram-v2
+    direction LR
+
+    Moving: Moving<br/>status changed recently<br/>no label
+    Blocked: Blocked<br/>status — waiting on someone<br/>outside the team
+    Aging: Aging<br/>label — aging
+    Stale: Stale<br/>label — stale
+    Resolved: Moving again, or gone<br/>resume · hand off<br/>unclaim · wontfix
+
+    [*] --> Moving
+    [*] --> Blocked: blocked before it starts
+    Moving --> Blocked: an outside party has to act
+    Blocked --> Moving: the block is removed
+    Moving --> Aging: 3 working days, no status change
+    Blocked --> Aging: 3 working days, no status change
+    Aging --> Stale: 7 working days, no status change
+    Aging --> Resolved: assigned engineer acts
+    Stale --> Resolved: the team acts
+    Resolved --> [*]
+
+    note right of Blocked
+        Ages without leaving.
+        Keeps the status, takes
+        the label, and shows in
+        the blocked panel.
+    end note
+
+    classDef inScope fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    class Moving,Blocked,Aging,Stale,Resolved inScope

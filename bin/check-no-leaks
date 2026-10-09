@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# Fails if the reference project's product, people or ticket keys come back into
+# the kit. Run before every commit to the kit and in CI.
+#
+# **The kit is named Aurora Kit, so the bare word "aurora" is allowed.** What is
+# refused is the product: its domain words, its ticket keys, its org names, and
+# the paths that only exist inside its own source tree.
+#
+# Not scanned: this script, its test (which holds the words as data), the vendored
+# LICENSE and .git.
+
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+PATTERN='AUR-[0-9]|GH-[0-9]{2,}|atlassian\.net|\bDFM\b|sonic|verity|polaris|mantine|storybook|fontawesome|aurora-venv|src/aurora|aurora\.(services|domain|clients)|\.verity-mcp|gpt-5\.6'
+
+# Names of people, customers and organizations are not kept in this committed
+# file. List them one per line in `.kit/leak-names.local` (gitignored); each is
+# added to the pattern when the file exists.
+if [ -f .kit/leak-names.local ]; then
+    names=$(grep -v '^[[:space:]]*#' .kit/leak-names.local | grep -v '^[[:space:]]*$' | paste -sd'|' -)
+    [ -n "$names" ] && PATTERN="$PATTERN|$names"
+fi
+
+hits=$(grep -rniE "$PATTERN" . \
+    --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=__pycache__ \
+    --exclude=check-no-leaks --exclude=test_leak_check.py \
+    --exclude=LICENSE --exclude=leak-names.local 2>/dev/null)
+scan_status=$?
+
+# grep exits 0 on a match, 1 on none, and 2 on an error. An error with no hits
+# means the scan did not happen, which is a failure and never a pass.
+if [ "$scan_status" -ge 2 ] && [ -z "$hits" ]; then
+    echo "FAILED: the scan itself errored (grep exit $scan_status), so nothing was checked."
+    exit 2
+fi
+
+if [ -n "$hits" ]; then
+    echo "LEAK: the reference project's product is back in the kit:"
+    echo "$hits" | head -40
+    exit 1
+fi
+echo "check-no-leaks: clean"

@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant Author
+    participant Gate as the hook or CI
+    participant Scan as tools/claims.py
+    participant Source as the source tree
+    participant Lists as the two lists
+
+    Author->>Gate: commit, or open a pull request
+    Gate->>Scan: run the scan
+    Scan->>Source: tokenize every module outside the tests
+    Source-->>Scan: every bold run, with its line and symbol
+    Scan->>Lists: every entry and every owed line
+    Lists-->>Scan: the claims they account for, by whole text
+    opt on a pull request
+        Scan->>Lists: the owed list at the base
+        Lists-->>Scan: did the seeded ticket grow?
+        Scan-->>Gate: claims that lost their bold, as a warning
+    end
+    alt every claim accounted for, nothing stale, the seed did not grow
+        Scan-->>Gate: pass, and the owed count
+    else anything else
+        Scan-->>Gate: fail, grouped by file, with three ways out
+        Gate-->>Author: list it, owe it, or remove the bold
+    end

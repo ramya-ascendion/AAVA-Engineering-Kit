@@ -1,0 +1,61 @@
+# npm installs, wherever they land, so a stray node_modules can never reach a
+# commit.
+node_modules/
+
+# Editors and OS
+.cursor/
+.DS_Store
+.vscode/
+# Agent sessions' worktrees, each a whole checkout of some other branch.
+.claude/worktrees/
+
+# Secrets — never commit. Each .env holds its own; its .env.example lists what.
+# `.kit/config.env` is deliberately NOT here: it holds per-project settings, no
+# secrets, and is committed so every clone gates the same way.
+.env
+.env.*
+!.env.example
+
+# Each developer's own environments — their addresses are theirs. It holds no
+# secrets, only the names of the variables secrets are read from, but it is
+# ignored for the same reason .env is: the values in it are local.
+# environments.example.yaml is committed and is the list of what an entry states.
+environments.yaml
+
+# Editor and hand-made backups. A backup of an ignored file carries the same
+# local values the original is ignored for, and is one `git add .` away from
+# history.
+*.bak
+
+# Python virtual environments.
+#
+# **No trailing slash on purpose.** A worktree reaches a big local cache by
+# symlinking the main checkout's copy rather than building its own, and a
+# symlink is not a directory — so a trailing slash does not match one. A
+# `.venv/` rule left every worktree reporting its environment as untracked
+# forever. A git status that is never clean is one a person learns to skim, and
+# skimming git status is how real work gets lost.
+#
+# `*-venv` covers a project's own `KIT_VENV_DIR` when it is named for the
+# project. This is the only place that rule is written down.
+.venv
+venv
+*-venv
+
+# uv's lockfile. `setup-dev-env.sh` installs with `uv pip install` when uv is
+# there and plain pip when it is not, and neither of those reads this file — so
+# committing it would pin nothing and rot quietly.
+uv.lock
+
+# Python build and cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.kit/leak-names.local

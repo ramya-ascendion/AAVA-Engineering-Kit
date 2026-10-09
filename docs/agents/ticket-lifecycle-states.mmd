@@ -1,0 +1,19 @@
+stateDiagram-v2
+    direction LR
+    [*] --> ToDo
+
+    ToDo: To Do<br/>label — ready-for-agent<br/>assignee — nobody yet
+    InProgress: In Progress<br/>label — ready-for-agent<br/>assignee — the engineer
+    InReview: In Review<br/>label — ready-for-human<br/>assignee — the engineer
+    Done: Done<br/>label — none, removed<br/>assignee — the engineer
+    Blocked: Blocked<br/>label — ready-for-human<br/>assignee — the engineer, still
+
+    ToDo --> InProgress: claimed
+    InProgress --> InReview: review clean + criteria ticked — PR follows on go
+    InReview --> Done: approved, merged
+    InReview --> InProgress: changes requested — the label goes back
+    InProgress --> Blocked: someone outside the team must act
+    Blocked --> InProgress: the block is removed — back to where the work really is
+    ToDo --> Blocked: an outside dependency known before anyone starts
+    Blocked --> ToDo: the block is removed, and nothing had started yet
+    Done --> [*]

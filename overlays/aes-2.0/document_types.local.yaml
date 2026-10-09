@@ -1,0 +1,18 @@
+# AAVA-AES-2.0's own document types, on top of the kit's generic registry in
+# `tools/document_types.yaml`. The installer never overwrites this file.
+types:
+  - type: compliance-note
+    name: Compliance note
+    status: pending
+    paths: [docs/compliance/*.md]
+    for: What the studio does and does not do against a regulation or standard.
+    born: When a regulation or standard is assessed.
+    dies: When the assessment is replaced by a newer one.
+    owner: The author, named in the file.
+    extras: []
+    enforcement: inferred
+
+# `docs/PENDING-BRANCHES.md` is this repo's tracker for open branches, and
+# `AGENTS.md` names it. It sits at the root of `docs/` on purpose.
+allowed_paths:
+  - docs/PENDING-BRANCHES.md

@@ -1,0 +1,11 @@
+flowchart TD
+    Q{"What does the reader<br/>need to see?"}
+    Q -->|which parts talk| C4["C4 container level<br/>flowchart"]
+    Q -->|what happens in what order| SEQ["UML sequence<br/>sequenceDiagram"]
+    Q -->|states a thing moves through| ST["UML state machine<br/>stateDiagram-v2"]
+    Q -->|who owns each step| BP["BPMN lanes<br/>flowchart + subgraph per lane"]
+    Q -->|how records relate| ER["ER crow's foot<br/>erDiagram"]
+    Q -->|option A against option B| CMP["Comparison<br/>flowchart + subgraph per option"]
+
+    classDef std fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    class C4,SEQ,ST,BP,ER,CMP std

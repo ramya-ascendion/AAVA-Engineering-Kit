@@ -1,0 +1,19 @@
+# Functions the CRAP gate does not score. The rule is in
+# `docs/agents/coverage-and-crap.md`.
+#
+# Format: one `path::name` per line, in the form the gate prints. Blank lines and
+# lines starting with `#` are ignored, as is anything after a `#` on an entry
+# line, so the reason for an entry lives right above or beside it.
+#
+#     src/my_project/area/module.py::Class.method   # why it stays this complex
+#
+# **An entry needs a reason that outlives the score.** A function belongs here
+# only when a decision already made says it stays the shape it is — not because
+# simplifying it is awkward, and never because a number is inconvenient. If the
+# reason is not already written down somewhere else, it is not a reason yet.
+#
+# Remember what the formula does before adding anything: at full coverage CRAP
+# is just the complexity, so an entry here is a claim that a function is
+# allowed to be complex, not a claim that it is hard to test.
+#
+# No entries yet.

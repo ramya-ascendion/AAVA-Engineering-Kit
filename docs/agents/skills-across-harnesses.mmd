@@ -1,0 +1,32 @@
+%% layout: mmdc default route
+flowchart TD
+    CONV["AGENTS.md<br/>conventions, harness-neutral"]
+
+    CC["Claude Code"]
+    CODEX["Codex"]
+    CURSOR["Cursor"]
+
+    CLAUDE_DIR[".claude/skills/<br/>symlinks only, no real files"]
+    AGENTS_DIR[".agents/skills/<br/>aes-* real, borrowed ones symlinked"]
+    VENDOR["vendor/mattpocock-skills/<br/>pristine upstream skills"]
+
+    YAML["agents/openai.yaml<br/>every vendored skill has one, none of ours"]
+    CURSOR_DIR[".cursor/<br/>gitignored, per-engineer"]
+
+    CONV -->|"read directly"| CC
+    CONV -->|"read directly"| CODEX
+    CONV -->|"read directly"| CURSOR
+
+    CC -->|"resolves skills from"| CLAUDE_DIR
+    CLAUDE_DIR -->|"every entry a symlink"| AGENTS_DIR
+    AGENTS_DIR -->|"one symlink per borrowed skill"| VENDOR
+    VENDOR -->|"ships Codex metadata"| YAML
+
+    CODEX -.->|"no proven path"| AGENTS_DIR
+    AGENTS_DIR -.->|"ours ship none"| YAML
+    CURSOR -.->|"nothing tracked in the repo"| CURSOR_DIR
+
+    classDef inScope fill:#0F1622,stroke:#34E0B4,stroke-width:1.5px,color:#E9F1F9
+    classDef gap fill:#1A2638,stroke:#FFC53D,stroke-width:1.5px,color:#E9F1F9
+    class CONV,CC,CLAUDE_DIR,AGENTS_DIR,VENDOR inScope
+    class CODEX,CURSOR,YAML,CURSOR_DIR gap

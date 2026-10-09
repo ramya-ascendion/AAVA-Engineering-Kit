@@ -1,0 +1,45 @@
+# Dependabot opens a pull request when a dependency this repo pins has a newer
+# release. It reads the manifests; it does not run anything in CI.
+#
+# **Alerts and security updates are repo settings, not this file.** This file
+# only turns on version updates. The alert on a known vulnerability, and the
+# pull request that fixes one, come from Settings -> Code security, which also
+# needs the dependency graph switched on there.
+#
+# Each ecosystem is grouped into one weekly pull request, so a week of small
+# bumps is one review instead of a dozen.
+#
+# **A release waits seven days before Dependabot proposes it.** A hijacked
+# package is usually caught and pulled within days, so the wait keeps one off
+# this repo. A fix for a known vulnerability skips the wait.
+#
+# Two ecosystems only: pip (the hash-pinned `tools/requirements-*.txt` the CI
+# gates install from) and github-actions. A project that adds npm or docker
+# manifests adds an entry for them, with the same cooldown and grouping.
+
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directories:
+      - "/"
+      - "/tools"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      pip:
+        patterns: ["*"]
+
+  # The actions the workflows use, which are pinned by commit hash. Dependabot
+  # moves the hash and the version comment beside it together.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
